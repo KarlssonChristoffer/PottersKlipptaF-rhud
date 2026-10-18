@@ -1,0 +1,20 @@
+{
+  "name": "clippit",
+  "version": "1.0.0",
+  "description": "Clippit for Claude Code: the Office Assistant on your desktop, telling you which Claude Code session finished, what it did, and when one needs you.",
+  "license": "MIT",
+  "repository": "github:LucasStrand/clippit",
+  "private": true,
+  "type": "module",
+  "main": "app/main.mjs",
+  "scripts": {
+    "setup": "node install/setup.mjs",
+    "start": "electron .",
+    "install-hooks": "node install/install.mjs",
+    "uninstall-hooks": "node install/install.mjs --uninstall",
+    "test": "node --test test/"
+  },
+  "devDependencies": {
+    "electron": "44.5.1"
+  }
+}

@@ -1,0 +1,78 @@
+/* Clippit on the desktop: the 124x93 character in the bottom-right corner of a transparent window,
+   and the Office word balloon above him (colours and font from the character file). */
+
+@font-face { font-family: "XP Tahoma"; src: local("Tahoma"), url(../assets/fonts/wine-tahoma.ttf) format("truetype"); }
+@font-face {
+  font-family: "XP Tahoma";
+  font-weight: bold;
+  src: local("Tahoma Bold"), local("Tahoma-Bold"), url(../assets/fonts/wine-tahomabd.ttf) format("truetype");
+}
+
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font: 11px "XP Tahoma", Tahoma, "Segoe UI", sans-serif;
+  color: #000;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+#clippy { position: absolute; right: 10px; bottom: 6px; width: 124px; height: 93px; touch-action: none; }
+#clippy.gone { visibility: hidden; }
+#clippy .sprite { width: 124px; height: 93px; background: url(../assets/clippy/atlas.png) no-repeat; }
+
+.balloon {
+  position: absolute;
+  right: 22px;
+  bottom: 106px;
+  width: 268px;
+  max-height: 290px;
+  box-sizing: border-box;
+  padding: 7px 10px 8px;
+  background: #ffffe1;
+  border: 1px solid #000;
+  border-radius: 7px;
+  line-height: 14px;
+  box-shadow: 2px 2px 2px rgba(0, 0, 0, 0.18);
+  overflow: visible;
+}
+.balloon[hidden] { display: none; }
+.balloon .scroll { max-height: 266px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
+.balloon .tail { position: absolute; right: 52px; top: 100%; width: 0; height: 0; border: 9px solid transparent; border-top-color: #000; border-bottom: 0; }
+.balloon .tail::after { content: ""; position: absolute; left: -8px; bottom: 1px; border: 8px solid transparent; border-top-color: #ffffe1; border-bottom: 0; }
+.balloon .hd { margin-bottom: 4px; }
+.balloon .hd b { display: block; font-size: 12px; overflow-wrap: anywhere; }
+.balloon .hd small { display: block; color: #6b6b5b; margin-top: 1px; overflow-wrap: anywhere; }
+.balloon p { margin: 0 0 6px; overflow-wrap: anywhere; }
+.balloon .lead { font-weight: bold; }
+.balloon .stats { color: #4d4d3f; margin: 0 0 6px; }
+.balloon .stats span + span::before { content: " · "; color: #9a9a85; }
+.balloon .quote { margin: 0 0 6px; padding-left: 6px; border-left: 2px solid #d9d9b4; color: #3d3d32; white-space: pre-wrap; }
+.balloon .list { margin: 0 0 6px; padding: 0; list-style: none; }
+.balloon .list li { padding: 1px 0; overflow-wrap: anywhere; }
+.balloon code { font: 11px ui-monospace, "DejaVu Sans Mono", Consolas, monospace; background: #f3f3cf; padding: 0 2px; }
+.balloon .opt { display: flex; align-items: flex-start; gap: 6px; padding: 2px 0; cursor: pointer; }
+.balloon .opt::before {
+  content: "";
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-top: 2px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #9cc4ff, #1f5ee0 60%, #0a2f8c);
+}
+.balloon .opt:hover { color: #0000c0; text-decoration: underline; }
+.balloon .more { margin-top: 4px; color: #6b6b5b; text-align: right; }
+.balloon .sess { display: grid; grid-template-columns: 14px 1fr; gap: 0 4px; padding: 3px 2px; border-radius: 3px; cursor: pointer; }
+.balloon .sess:hover { background: #f3f3c4; }
+.balloon .sess .st { grid-row: span 2; }
+.balloon .sess b { overflow-wrap: anywhere; }
+.balloon .sess small { color: #6b6b5b; overflow-wrap: anywhere; }
+.st.working { color: #1f5ee0; }
+.st.waiting { color: #c22; }
+.st.idle { color: #2a8a2a; }
+.st.error { color: #c60; }

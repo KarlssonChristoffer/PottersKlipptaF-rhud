@@ -1,0 +1,17 @@
+#!/bin/sh
+# Start Clippit (Linux and macOS). Uses $CLIPPIT_ELECTRON, then a system Electron (Arch: `pacman -S electron`),
+# then the one `npm install` put in node_modules.
+here=$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.." && pwd)
+electron="$CLIPPIT_ELECTRON"
+if [ -z "$electron" ]; then
+  for e in electron electron44 electron43 electron42 electron41 electron40 electron39 "$here/node_modules/.bin/electron"; do
+    if command -v "$e" >/dev/null 2>&1; then electron=$e; break; fi
+  done
+fi
+[ -n "$electron" ] || { echo "clippit: no Electron found. Arch: sudo pacman -S electron; elsewhere: npm install in $here" >&2; exit 1; }
+flags=""
+if [ "$(uname)" = Linux ]; then
+  # X11 (XWayland on Wayland desktops) lets the window shape itself, stay on top and move by drag.
+  flags="--ozone-platform=x11 --class=clippit --name=clippit --enable-transparent-visuals"
+fi
+exec "$electron" $flags "$here" "$@"
