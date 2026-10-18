@@ -12,7 +12,6 @@ Clippit's browser extension. It does three things:
   (`src/clippitBridge.js` ↔ `lib/bridge.mjs`), so Mark a zone can read the page under the zone without
   "Allow JavaScript from Apple Events". Turn that Safari/Chrome setting **off**: it let any app with
   Automation rights run JavaScript in your logged-in tabs.
-
 - **Watches your localhost pages** (localhost, 127.0.0.1, *.localhost, *.test, nothing else). When a
   Claude session changed files in the project a localhost tab is served from, Clippit reloads that tab;
   when such a page throws (uncaught errors, unhandled rejections, console.error), Clippy says so and
