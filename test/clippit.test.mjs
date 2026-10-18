@@ -15,6 +15,7 @@ import { addHooks, removeHooks, EVENTS } from '../install/install.mjs';
 import { decompress } from '../install/acs.mjs';
 import { composePrompt } from '../lib/handoff.mjs';
 import { sandboxFor, summarize, _test as zone } from '../lib/zone.mjs';
+import { isFocused } from '../lib/platform.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'clippit-test-'));
@@ -89,13 +90,14 @@ test('server + hook: only the token holder gets in, and the hook delivers the ev
   assert.equal(await post({ 'content-type': 'application/json', 'x-clippit-token': token }, '{"ok":1}'), 204);
   const event = { session_id: 'h1', hook_event_name: 'Stop', cwd: '/tmp' };
   const r = spawnSync(process.execPath, [path.join(root, 'hook', 'clippit-hook.mjs')], {
-    input: JSON.stringify(event), env: { ...process.env, CLIPPIT_HOME: home, TMUX_PANE: '%3' }, timeout: 5000 });
+    input: JSON.stringify(event), env: { ...process.env, CLIPPIT_HOME: home, TMUX_PANE: '%3', CLAUDE_CODE_HOST_SESSION_ID: 'local_abc-1' }, timeout: 5000 });
   assert.equal(r.status, 0);
   assert.equal(String(r.stdout), '', 'the hook prints nothing');
   await new Promise(res => setTimeout(res, 100));
   const last = got[got.length - 1];
   assert.equal(last.event.session_id, 'h1');
   assert.equal(last.origin.env.TMUX_PANE, '%3');
+  assert.equal(last.origin.env.CLAUDE_CODE_HOST_SESSION_ID, 'local_abc-1', 'desktop app session id comes along for Show me');
   if (process.platform === 'linux') assert.ok(last.origin.pids.some(p => p.pid === process.pid), 'process chain reaches the caller');
   srv.close();
   const offline = spawnSync(process.execPath, [path.join(root, 'hook', 'clippit-hook.mjs')], {
@@ -226,4 +228,9 @@ test('zone: websites that are not yours get a scratch folder, localhost does not
   const ctx = { images: { zone: 'zone.png', around: null }, sandbox: { url: 'https://feber.se/', host: 'feber.se', path: '/s/feber.se' } };
   const p = composePrompt({ request: 'Bygg en likadan layout', bundleDir: '/z', ctx });
   assert.ok(p.includes("isn't my code") && p.includes('open index.html'));
+});
+
+test('platform: a Claude desktop session never counts as the one in front', async () => {
+  const s = { origin: { env: { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', CLAUDE_CODE_HOST_SESSION_ID: 'local_x' }, pids: [{ pid: 1 }] } };
+  assert.equal(await isFocused(s, 'darwin'), false);
 });
