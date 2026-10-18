@@ -12,7 +12,8 @@ import { focusSession, isFocused } from '../lib/platform.mjs';
 import { startServer } from '../lib/server.mjs';
 import { Sessions } from '../lib/sessions.mjs';
 import { composePrompt, launchClaude, writePrompt } from '../lib/handoff.mjs';
-import { addRepo, frontApp, gatherZone, gitTop, repoFromUrl, summarize, writeBundle } from '../lib/zone.mjs';
+import { addRepo, frontApp, gatherZone, gitTop, prepareHelpers, repoFromUrl, summarize, writeBundle } from '../lib/zone.mjs';
+import { execFile } from 'node:child_process';
 import { startBridge } from '../lib/bridge.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -270,7 +271,7 @@ function beginZone(rect, p) {
   zone.ctxPromise = (async () => {
     await sleep(250);                                    // let the overlay leave the screen before the screenshot
     const front = await p.frontPromise;
-    return gatherZone(rect, { display: p.display, front, sessions: sessions.list(), dir: zdir, configDir: dir, bridge });
+    return gatherZone(rect, { display: p.display, front, sessions: sessions.list(), dir: zdir, configDir: dir, bridge, sandbox: settings.zoneSandbox });
   })().then(ctx => {
     if (zone && zone.id === id) send('zone-context', { id, summary: summarize(ctx), notes: ctx.notes, images: !!ctx.images.zone });
     return ctx;
@@ -287,9 +288,15 @@ async function submitZone(id, text) {
   zone = null;
   const ctx = await z.ctxPromise;
   if (!ctx) { say('Something went wrong while I looked at that zone. Try again?'); return; }
+  if (!ctx.repo && ctx.sandbox) {
+    mkdirSync(ctx.sandbox.path, { recursive: true });
+    if (!existsSync(path.join(ctx.sandbox.path, '.git'))) await new Promise(r => execFile('git', ['init', '-q', ctx.sandbox.path], () => r()));
+    await addRepo(ctx, ctx.sandbox.path, `a scratch folder for ${ctx.sandbox.host} (that site isn't your code)`, sessions.list());
+  }
   if (!ctx.repo) {
+    const dev = path.join(os.homedir(), 'Developer');
     const r = await dialog.showOpenDialog({ title: 'Which project is this in?', buttonLabel: 'Use this project',
-      properties: ['openDirectory'], defaultPath: os.homedir() });
+      properties: ['openDirectory', 'createDirectory'], defaultPath: existsSync(dev) ? dev : os.homedir() });
     if (r.canceled || !r.filePaths[0]) { say('OK, I put it away. Your zone is saved in ' + z.dir); return; }
     await addRepo(ctx, r.filePaths[0], 'you picked it', sessions.list());
   }
@@ -466,6 +473,7 @@ app.whenReady().then(async () => {
   bridge = startBridge({ dir, onEvent: onBrowserEvent });
   createWindow();
   createTray();
+  prepareHelpers(dir).catch(() => {});
   registerShortcut();
   screen.on('display-metrics-changed', () => {
     if (win && !settings.position) { const p = homePosition(); win.setPosition(p.x, p.y); }

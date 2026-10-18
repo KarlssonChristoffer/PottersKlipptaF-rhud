@@ -14,7 +14,7 @@ import { gist, readTranscript } from '../lib/transcript.mjs';
 import { addHooks, removeHooks, EVENTS } from '../install/install.mjs';
 import { decompress } from '../install/acs.mjs';
 import { composePrompt } from '../lib/handoff.mjs';
-import { summarize, _test as zone } from '../lib/zone.mjs';
+import { sandboxFor, summarize, _test as zone } from '../lib/zone.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'clippit-test-'));
@@ -217,4 +217,13 @@ test('browser bridge: only extensions get in, pairing hands out a key once, then
   assert.ok(bridge.connected('chromium') && !bridge.connected('safari'));
   again.s.destroy();
   bridge.close();
+});
+
+test('zone: websites that are not yours get a scratch folder, localhost does not', () => {
+  assert.deepEqual(sandboxFor('https://www.feber.se/nyheter', '/s'), { path: '/s/feber.se', host: 'feber.se', url: 'https://www.feber.se/nyheter' });
+  assert.equal(sandboxFor('http://localhost:3000/', '/s'), null);
+  assert.equal(sandboxFor('file:///x.html', '/s'), null);
+  const ctx = { images: { zone: 'zone.png', around: null }, sandbox: { url: 'https://feber.se/', host: 'feber.se', path: '/s/feber.se' } };
+  const p = composePrompt({ request: 'Bygg en likadan layout', bundleDir: '/z', ctx });
+  assert.ok(p.includes("isn't my code") && p.includes('open index.html'));
 });
