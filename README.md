@@ -53,6 +53,15 @@ zone, over a paired WebSocket to the app (`lib/bridge.mjs`), so "Allow JavaScrip
 stay off. It also reloads your localhost page when Claude changed its project, and lets Clippy tell you
 when a localhost page throws, with an offer to send the error to Claude. Build and install steps are in [extension/README.md](extension/README.md).
 
+## Voice commands (prepared, off)
+
+`lib/voice.mjs` is the plumbing for talking to Clippit: a speech provider turns your voice into text, and a
+command registry matches it against phrases like "mark a zone", "gå till {session}" or "be quiet" and runs
+the matching Clippit command (`registerVoiceCommands` in `app/main.mjs`). No speech provider ships yet and
+`voice.enabled` is false in `settings.json`, so nothing listens. A provider is an object with `name`,
+`start(onUtterance)` and `stop()`, registered with `registerProvider`; while `voice.dryRun` is true Clippit
+only says which command it heard.
+
 ## How it works
 
 `hook/clippit-hook.mjs` runs for each Claude Code event as an **async** hook: it can't block or change Claude, and

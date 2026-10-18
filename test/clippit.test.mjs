@@ -218,3 +218,36 @@ test('browser bridge: only extensions get in, pairing hands out a key once, then
   again.s.destroy();
   bridge.close();
 });
+
+test('voice: phrases with slots, Swedish, dry run, and nothing listens unless turned on', async () => {
+  const { VoiceCommands, startVoice, registerProvider, manualProvider, normalize } = await import('../lib/voice.mjs');
+  const c = new VoiceCommands();
+  const ran = [];
+  c.register({ id: 'focus', describe: 'Bring a session forward', phrases: ['focus {session}', 'gå till {session}'], run: a => { ran.push(a.session); return 'ok'; } });
+  c.register({ id: 'hide', phrases: ['hide', 'göm dig'], run: () => ran.push('hide') });
+  assert.equal(normalize('  Hey, Clippit! Göm dig.'), 'hey clippit göm dig');
+  assert.deepEqual(c.match('Focus the shop cart page').args, { session: 'the shop cart page' });
+  assert.equal(c.match('Hey Clippy, gå till shop').args.session, 'shop');
+  assert.equal(c.match('göm dig tack').id, 'hide');
+  assert.equal(c.match('hide the bodies'), null);
+  assert.equal((await c.dispatch('focus shop', { dryRun: true })).dryRun, true);
+  assert.deepEqual(ran, []);
+  assert.equal((await c.dispatch('focus shop')).result, 'ok');
+  assert.deepEqual(ran, ['shop']);
+  assert.equal((await c.dispatch('sing a song')).reason, 'no-match');
+
+  const quiet = { warn() {} };
+  assert.equal(startVoice({ commands: c, settings: {} }).running, false);
+  assert.equal(startVoice({ commands: c, settings: { enabled: true, provider: 'nope' }, log: quiet }).running, false);
+  const mic = manualProvider();
+  registerProvider('manual', () => mic);
+  const results = [];
+  const v = startVoice({ commands: c, settings: { enabled: true, provider: 'manual', minConfidence: 0.5 }, onResult: r => results.push(r) });
+  assert.equal(v.running, true);
+  await mic.say('hide');                                   // dry run unless dryRun is false
+  await mic.say('hide', { confidence: 0.2 });
+  await mic.say('hid', { final: false });
+  assert.deepEqual(results.map(r => r.dryRun || r.reason), [true, 'unsure']);
+  assert.deepEqual(ran, ['shop']);
+  v.stop();
+});

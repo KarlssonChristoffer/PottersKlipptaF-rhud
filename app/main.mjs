@@ -14,6 +14,7 @@ import { Sessions } from '../lib/sessions.mjs';
 import { composePrompt, launchClaude, writePrompt } from '../lib/handoff.mjs';
 import { addRepo, frontApp, gatherZone, gitTop, repoFromUrl, summarize, writeBundle } from '../lib/zone.mjs';
 import { startBridge } from '../lib/bridge.mjs';
+import { startVoice, VoiceCommands } from '../lib/voice.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const asset = name => path.join(here, 'assets', 'clippy', name);
@@ -324,6 +325,47 @@ function registerShortcut() {
   } catch (e) { console.warn('clippit: shortcut', e.message); }
 }
 
+// ---------------------------------------------------------------- voice commands
+//
+// The commands you could say to Clippit, once a speech provider exists (lib/voice.mjs). Off by default;
+// with settings.voice.dryRun Clippit only tells you what it heard and what it would have done.
+
+const voiceCommands = new VoiceCommands();
+let voice = { running: false, stop() {} };
+
+function findSession(name) {
+  const want = String(name || '').toLowerCase();
+  return visible().find(s => sessions.label(s).toLowerCase().includes(want) || (sessions.where(s) || '').toLowerCase().includes(want));
+}
+
+function registerVoiceCommands() {
+  const c = voiceCommands;
+  c.register({ id: 'mark-zone', describe: 'Mark a zone', phrases: ['mark a zone', 'mark zone', 'markera en zon', 'markera zon'], run: () => startZone() });
+  c.register({ id: 'hide', describe: 'Hide Clippit', phrases: ['hide', 'go away', 'göm dig', 'försvinn'], run: () => setHidden(true) });
+  c.register({ id: 'show', describe: 'Show Clippit', phrases: ['show yourself', 'come back', 'kom tillbaka', 'visa dig'], run: () => setHidden(false) });
+  c.register({ id: 'animate', describe: 'Animate', phrases: ['animate', 'do something', 'gör något'], run: () => send('animate', {}) });
+  c.register({ id: 'dnd-on', describe: 'Do Not Disturb for an hour', phrases: ['do not disturb', 'be quiet', 'var tyst', 'stör ej'],
+    run: () => { settings.dndUntil = Date.now() + 60 * 60e3; save(); pushState(); } });
+  c.register({ id: 'dnd-off', describe: 'Do Not Disturb off', phrases: ['you can talk again', 'disturb me', 'du får prata igen'],
+    run: () => { settings.dndUntil = 0; save(); pushState(); } });
+  c.register({ id: 'focus-waiting', describe: 'Bring forward the session that waits for you', phrases: ['who needs me', 'show me the waiting one', 'vem väntar'],
+    run: () => { const s = visible().find(x => x.status === 'waiting'); if (s) focus(s.id); return s ? sessions.label(s) : null; } });
+  c.register({ id: 'focus', describe: 'Bring a session forward', phrases: ['focus {session}', 'go to {session}', 'open {session}', 'gå till {session}', 'öppna {session}'],
+    run: ({ session }) => { const s = findSession(session); if (s) focus(s.id); return s ? sessions.label(s) : null; } });
+}
+
+function onVoiceResult(r) {
+  if (!r.ok && r.reason === 'no-match') { console.log(`clippit: voice: no command for "${r.said}"`); return; }
+  if (!r.ok) { console.log(`clippit: voice: ${r.reason}${r.error ? ` (${r.error})` : ''} for "${r.said}"`); return; }
+  if (r.dryRun) say(`I heard “${r.said}”. That's ${r.describe}, but voice commands are in dry run, so I didn't do it.`, 'Voice command');
+}
+
+function startVoiceCommands() {
+  voice.stop();
+  voice = startVoice({ commands: voiceCommands, settings: settings.voice || {}, onResult: onVoiceResult });
+  if (voice.running) console.log(`clippit: voice commands listening with ${voice.provider}${settings.voice.dryRun !== false ? ' (dry run)' : ''}`);
+}
+
 // ---------------------------------------------------------------- menus
 
 function ago(t) {
@@ -448,7 +490,7 @@ ipcMain.on('hide', () => setHidden(true));
 
 app.on('second-instance', () => setHidden(false));
 app.on('window-all-closed', () => { /* keep running in the tray */ });
-app.on('before-quit', () => { quitting = true; if (server) server.close(); if (bridge) bridge.close(); });
+app.on('before-quit', () => { quitting = true; if (server) server.close(); if (bridge) bridge.close(); voice.stop(); });
 app.on('will-quit', () => globalShortcut.unregisterAll());
 
 app.whenReady().then(async () => {
@@ -467,6 +509,8 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
   registerShortcut();
+  registerVoiceCommands();
+  startVoiceCommands();
   screen.on('display-metrics-changed', () => {
     if (win && !settings.position) { const p = homePosition(); win.setPosition(p.x, p.y); }
   });
