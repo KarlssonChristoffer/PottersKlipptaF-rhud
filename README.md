@@ -45,6 +45,19 @@ animation. Don't use `nofocus`: Hyprland then drops clicks, and you couldn't ans
 and iTerm2); on Windows it brings the terminal's window forward. Clippit is used daily on Linux; the macOS and
 Windows paths are written and tested less, so issues and fixes are welcome.
 
+## Run it on your own server
+
+Set `offloadHost` in Clippit's `settings.json` to a host from your `~/.ssh/config` (key login) and every task Clippit
+starts asks first: **run it here, or on your server?** Only a yes sends anything there. Clippit copies the project
+(tracked and untracked files, nothing git ignores) to a fresh folder on the server, runs `claude -p` in it, shows
+what it's doing in the balloon, and brings the changes back as a patch you can apply here or throw away.
+
+The server side never stays open: the run dies with its ssh connection, has a time limit (`offloadMinutes`, 30 by
+default), and is closed after it finishes, fails, is stopped, or times out: its processes are killed, its folder
+deleted, and Clippit checks that nothing is left. Quitting Clippit waits for that cleanup, and a run an earlier
+Clippit couldn't confirm closed (a crash, a lost network) is closed at the next start. The server needs `claude`
+on its PATH and logged in; `offloadClaudeArgs` sets its permission mode (`acceptEdits` by default).
+
 ## How it works
 
 `hook/clippit-hook.mjs` runs for each Claude Code event as an **async** hook: it can't block or change Claude, and

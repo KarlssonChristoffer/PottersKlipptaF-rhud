@@ -2,6 +2,7 @@
 // Claude Code hook events (lib/server.mjs) to what Clippit says and does.
 
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, Notification, nativeImage, screen, shell, Tray } from 'electron';
+import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,6 +14,7 @@ import { startServer } from '../lib/server.mjs';
 import { Sessions } from '../lib/sessions.mjs';
 import { composePrompt, launchClaude, writePrompt } from '../lib/handoff.mjs';
 import { addRepo, frontApp, gatherZone, summarize, writeBundle } from '../lib/zone.mjs';
+import { applyPatch, configured, patchFiles, reachable, startOffload, sweep } from '../lib/offload.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const asset = name => path.join(here, 'assets', 'clippy', name);
@@ -219,10 +221,118 @@ async function submitZone(id, text) {
     await addRepo(ctx, r.filePaths[0], 'you picked it', sessions.list());
   }
   writeBundle(z.dir, ctx, text);
+  if (configured(settings) && settings.offloadAsk) {
+    const where = await askWhere(z.id, path.basename(ctx.repo.path));
+    if (where === 'cancel') { say('OK, I put it away. Your zone is saved in ' + z.dir); return; }
+    if (where === 'server') { runOnServer({ request: text, ctx, bundleDir: z.dir }); return; }
+  }
   const promptFile = writePrompt(z.dir, composePrompt({ request: text, bundleDir: z.dir, ctx, extra: settings.zoneInstructions }));
   const res = await launchClaude({ repo: ctx.repo.path, promptFile });
   if (res.ok) say(`I started Claude in ${path.basename(ctx.repo.path)} with your request and everything I found. I'll tell you when it's done.`, 'Sent to Claude', { animation: 'SendMail' });
   else say(`I couldn't open a terminal (${res.how}). Everything is in ${z.dir}.`, 'Mark a zone');
+}
+
+// ---------------------------------------------------------------- your server (lib/offload.mjs)
+//
+// When a server is set up (settings.offloadHost), every task Clippit starts first asks where to run.
+// A server run is headless; its progress shows in the balloon and the overview, the changes come back
+// as a patch you can apply, and the server side is always closed afterwards, also on Stop and on Quit.
+
+const offloads = new Map();          // id → { id, name, repo, line, phase, started, run, outcome }
+const asking = new Map();            // zone id → resolve('server' | 'here' | 'cancel')
+const serverName = () => settings.offloadName || 'server';
+
+function askWhere(id, repoName) {
+  return new Promise(resolve => {
+    asking.set(id, resolve);
+    send('offload-ask', { id, name: serverName(), repo: repoName });
+  });
+}
+ipcMain.on('offload-answer', (_e, d) => {
+  const r = d && asking.get(d.id);
+  if (!r) return;
+  asking.delete(d.id);
+  r(['server', 'here', 'cancel'].includes(d.where) ? d.where : 'cancel');
+});
+
+const publicOffload = o => ({ id: o.id, name: o.name, repo: o.repoName, line: o.line, phase: o.phase, started: o.started, running: !o.outcome });
+
+function pushOffloads() { send('offloads', [...offloads.values()].filter(o => !o.outcome).map(publicOffload)); }
+
+const HEADLESS = [
+  'You are running headless (claude -p) on my server, in a throwaway copy of this project that is deleted when you finish.',
+  "Nobody can answer questions during this run, so use your best judgment and see the task through.",
+  "Make the changes in the files; don't commit, push or deploy anything. Clippit brings the diff back to my Mac as a patch.",
+  'End with a short summary of what you changed and anything I should check.',
+].join('\n');
+
+function runOnServer({ request, ctx, bundleDir }) {
+  const repoName = path.basename(ctx.repo.path);
+  const o = { name: serverName(), repo: ctx.repo.path, repoName, line: 'getting ready', phase: 'upload', started: Date.now(), outcome: null };
+  const run = startOffload({
+    host: settings.offloadHost, repo: ctx.repo.path, bundleDir, configDir: dir,
+    minutes: Number(settings.offloadMinutes) || 30, claudeArgs: settings.offloadClaudeArgs || [],
+    prompt: remote => composePrompt({ request, bundleDir: `${remote}/zone`, ctx, extra: [settings.zoneInstructions, HEADLESS].filter(Boolean).join('\n\n') }),
+    onStatus: st => { o.phase = st.phase; o.line = st.line; send('offload-status', publicOffload(o)); pushOffloads(); },
+  });
+  Object.assign(o, { id: run.id, run });
+  offloads.set(run.id, o);
+  pushOffloads();
+  say(`I'm running this on your ${o.name}, in a copy of ${repoName}. I'll show what it's doing and tell you when it's done.`,
+    `${o.name}: ${repoName}`, { offload: run.id, live: true, animation: 'SendMail', actions: [{ label: 'Stop it', cmd: 'stop' }, { label: 'OK', cmd: 'ok' }] });
+  run.done.then(out => finishOffload(o, out)).catch(e => console.error('clippit: offload', e));
+}
+
+function finishOffload(o, out) {
+  o.outcome = out;
+  pushOffloads();
+  const files = patchFiles(out.patch);
+  const closed = out.closed && out.closed.ok ? `The ${o.name} is closed again, nothing left running there.`
+    : `⚠ I couldn't confirm the ${o.name} is clean (${(out.closed && out.closed.why) || 'no answer'}). I'll try again at my next start; the folder is ${out.dir}.`;
+  const actions = [];
+  if (out.patchFile && files.length) actions.push({ label: `Apply the changes here (${files.length} file${files.length === 1 ? '' : 's'})`, cmd: 'apply' }, { label: 'Open the patch', cmd: 'open' });
+  actions.push({ label: 'OK', cmd: 'ok' });
+  const r = out.result;
+  const stats = { files: files.length ? files : undefined, cost: r && r.cost, duration: r && r.seconds ? `${Math.round(r.seconds / 60) || '<1'} min` : undefined };
+  const a = out.ok
+    ? { kind: 'done', headline: 'finished', body: [(r.text || '').slice(0, 600), files.length ? '' : 'It changed no files.', closed].filter(Boolean).join('\n\n'), stats, animation: 'Congratulate' }
+    : { kind: 'error', headline: out.cancelled === 'timed out' ? `ran past ${settings.offloadMinutes} minutes, so I stopped it`
+        : out.cancelled ? 'stopped' : 'ran into trouble',
+      body: [out.cancelled ? '' : out.error, files.length ? 'It did change some files before it stopped; you can still look at them.' : '', closed].filter(Boolean).join('\n\n'), stats };
+  send('announce', { id: `o${Date.now()}`, title: `${o.name}: ${o.repoName}`, where: '', sticky: true, offload: o.id, actions, time: Date.now(), ...a });
+}
+
+async function offloadCmd(id, cmd) {
+  const o = offloads.get(id);
+  if (!o) return;
+  if (cmd === 'stop' && !o.outcome) { o.line = 'stopping'; o.run.cancel('stopped'); send('offload-status', publicOffload(o)); return; }
+  const file = o.outcome && o.outcome.patchFile;
+  if (cmd === 'open' && file) { if (IS_MAC) execFile('open', ['-t', file]); else shell.openPath(file); return; }
+  if (cmd === 'apply' && file) {
+    const r = await applyPatch(o.repo, file);
+    say(r.ok ? `Done: the changes from your ${o.name} are in ${o.repoName} now (not committed).`
+      : `I couldn't apply them cleanly (${r.why}). The patch is in ${file}.`, `${o.name}: ${o.repoName}`);
+  }
+}
+ipcMain.on('offload-cmd', (_e, d) => { if (d) offloadCmd(String(d.id), String(d.cmd)).catch(e => console.error('clippit: offload cmd', e)); });
+
+async function checkServer() {
+  const r = await reachable(settings.offloadHost);
+  say(r.ok ? `Your ${serverName()} answers (${r.hostname}:${r.port}, ${r.ms} ms). I only knocked; nothing ran there.`
+    : `I can't reach your ${serverName()} at ${r.hostname}:${r.port} (${r.why}).`, serverName());
+}
+
+// Quitting with runs on the server: stop them and wait for the cleanup first, so nothing is left open there.
+let closingRuns = false;
+function closeRunsThenQuit(e) {
+  const live = [...offloads.values()].filter(o => !o.outcome);
+  if (!live.length || closingRuns) return false;
+  e.preventDefault();
+  closingRuns = true;
+  for (const o of live) o.run.cancel('stopped');
+  const all = Promise.allSettled(live.map(o => o.run.done));
+  Promise.race([all, sleep(45000)]).finally(() => app.quit());
+  return true;
 }
 
 ipcMain.on('zone-start', () => startZone());
@@ -305,6 +415,15 @@ function menuTemplate() {
       .map(([v, label]) => ({ label, type: 'radio', checked: settings.systemNotifications === v,
         click: () => { settings.systemNotifications = v; save(); } })) },
     { label: 'Start at login', type: 'checkbox', checked: startsAtLogin(), click: i => setStartAtLogin(i.checked) },
+    { label: `Your ${serverName()}`, submenu: configured(settings) ? [
+      { label: `ssh ${settings.offloadHost}`, enabled: false },
+      { label: 'Offer it when I start a task', type: 'checkbox', checked: settings.offloadAsk, click: i => { settings.offloadAsk = i.checked; save(); } },
+      { label: 'Check the connection', click: () => checkServer().catch(() => {}) },
+      ...[...offloads.values()].filter(o => !o.outcome).map(o => ({ label: `Stop: ${o.repoName} (${o.line})`.slice(0, 80), click: () => offloadCmd(o.id, 'stop') })),
+    ] : [
+      { label: 'Not set up: add offloadHost (its ~/.ssh/config name) to settings.json', enabled: false },
+      { label: 'Open settings.json', click: () => { save(); shell.openPath(path.join(dir, 'settings.json')); } },
+    ] },
     { type: 'separator' },
     settings.hidden ? { label: 'Show Clippit', click: () => setHidden(false) } : { label: 'Hide Clippit', click: () => setHidden(true) },
     { label: 'Quit Clippit', click: () => app.quit() },
@@ -366,7 +485,11 @@ ipcMain.on('hide', () => setHidden(true));
 
 app.on('second-instance', () => setHidden(false));
 app.on('window-all-closed', () => { /* keep running in the tray */ });
-app.on('before-quit', () => { quitting = true; if (server) server.close(); });
+app.on('before-quit', e => {
+  if (closeRunsThenQuit(e)) { say(`Closing what's still running on your ${serverName()} first…`, serverName()); return; }
+  quitting = true;
+  if (server) server.close();
+});
 app.on('will-quit', () => globalShortcut.unregisterAll());
 
 app.whenReady().then(async () => {
@@ -388,4 +511,9 @@ app.whenReady().then(async () => {
     if (win && !settings.position) { const p = homePosition(); win.setPosition(p.x, p.y); }
   });
   console.log(`clippit: listening on 127.0.0.1:${server.port}`);
+  // Runs an earlier Clippit couldn't confirm closed (a crash, a lost network): close them now.
+  sweep({ configDir: dir }).then(left => {
+    for (const l of left) say(l.ok ? `I closed a run an earlier Clippit had left on ${l.host} (${l.dir}). Nothing is running there now.`
+      : `A run an earlier Clippit started on ${l.host} may still be there (${l.dir}): ${l.why}. I'll try again next time.`, serverName());
+  }).catch(e => console.error('clippit: sweep', e));
 });

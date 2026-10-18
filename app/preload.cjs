@@ -1,7 +1,7 @@
 // The only things the Clippit page may ask of the main process.
 const { contextBridge, ipcRenderer } = require('electron');
 
-const CHANNELS = ['state', 'announce', 'activity', 'animate', 'hide', 'show', 'zone-prompt', 'zone-context'];
+const CHANNELS = ['state', 'announce', 'activity', 'animate', 'hide', 'show', 'zone-prompt', 'zone-context', 'offload-ask', 'offload-status', 'offloads'];
 
 contextBridge.exposeInMainWorld('clippit', {
   platform: process.platform,
@@ -18,4 +18,6 @@ contextBridge.exposeInMainWorld('clippit', {
   zoneSubmit: (id, text) => ipcRenderer.send('zone-submit', { id: String(id), text: String(text) }),
   zoneDismiss: () => ipcRenderer.send('zone-dismiss'),
   openPrivacy: which => ipcRenderer.send('open-privacy', String(which)),
+  offloadAnswer: (id, where) => ipcRenderer.send('offload-answer', { id: String(id), where: String(where) }),
+  offloadCmd: (id, cmd) => ipcRenderer.send('offload-cmd', { id: String(id), cmd: String(cmd) }),
 });

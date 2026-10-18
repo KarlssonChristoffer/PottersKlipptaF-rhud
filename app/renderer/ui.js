@@ -4,6 +4,7 @@
 const bridge = window.clippit || {          // a stand-in so the page also runs in a plain browser (tests)
   platform: 'web', on() {}, ready() {}, shape() {}, hit() {}, drag() {}, dragEnd() {}, menu() {}, hide() {},
   zone() {}, zoneSubmit(id, text) { console.log('zone', id, text); }, zoneDismiss() {}, openPrivacy() {},
+  offloadAnswer(id, where) { console.log('offload', id, where); }, offloadCmd(id, cmd) { console.log('offload', id, cmd); },
   focus(id) { console.log('focus', id); },
 };
 
@@ -12,6 +13,7 @@ const sprite = clippyEl.querySelector('.sprite');
 const balloon = document.getElementById('balloon');
 
 let state = { sessions: [], settings: { sounds: true, doneSeconds: 30, toolAnimations: true, hidden: false }, dnd: false };
+let offloads = [], liveEl = null;
 let queue = [], current = null, view = null, dismissTimer = 0, idleTimer = 0, hovering = false, lastAct = 0, hidden = false;
 
 const agent = new Agent(sprite, window.AGENT, { sound: () => state.settings.sounds });
@@ -72,6 +74,7 @@ function openBalloon(build, { sticky = false, seconds = 12 } = {}) {
 
 function closeBalloon() {
   clearTimeout(dismissTimer);
+  liveEl = null;
   balloon.hidden = true;
   view = null;
   current = null;
@@ -123,6 +126,19 @@ function renderAnnouncement(a) {
     if (l) el('p', 'lead', body, l);
     if (a.body) el('p', null, body, a.body);
     statsLine(body, a.stats);
+    if (a.actions) {               // a run on your server: its own buttons instead of Show me
+      if (a.live) {
+        const o = offloads.find(x => x.id === a.offload);
+        liveEl = el('p', 'stats live', body, o ? `⏳ ${o.line}` : '⏳ getting ready');
+      }
+      for (const act of a.actions) {
+        option(body, act.label, () => {
+          if (act.cmd !== 'ok') bridge.offloadCmd(a.offload, act.cmd);
+          if (act.cmd !== 'open') advanceQueue();
+        });
+      }
+      return;
+    }
     if (a.sessionId) option(body, 'Show me', () => { bridge.focus(a.sessionId); advanceQueue(); });
     if (a.kind === 'done' && (a.reply || a.prompt || (a.stats && a.stats.files) || (a.commandList && a.commandList.length))) {
       option(body, 'What did it do?', () => details(a));
@@ -155,7 +171,7 @@ function details(a) {
 
 function enqueue(a) {
   if (!a) return;
-  if (view === 'zone') { queue.push(a); return; }     // don't interrupt someone typing
+  if (view === 'zone' || view === 'ask') { queue.push(a); return; }     // don't interrupt someone typing or choosing
   queue = queue.filter(q => !(q.sessionId === a.sessionId && q.kind === a.kind));
   if (current && view === 'announce' && current.sessionId === a.sessionId) current = null;  // replace what's showing
   queue.push(a);
@@ -166,6 +182,7 @@ function enqueue(a) {
 }
 
 function advanceQueue() {
+  liveEl = null;
   current = queue.shift() || null;
   if (!current) { closeBalloon(); return; }
   view = 'announce';
@@ -180,7 +197,9 @@ function overview() {
   current = null;
   const list = state.sessions.filter(s => s.status !== 'ended');
   openBalloon(body => {
-    if (!list.length) {
+    if (!list.length && offloads.length) {
+      header(body, { title: `Running on your ${offloads[0].name}` });
+    } else if (!list.length) {
       header(body, { title: 'No Claude Code sessions yet' });
       el('p', null, body, "Start claude in a terminal and I'll tell you when it finishes, needs your OK or runs into trouble.");
     } else {
@@ -199,6 +218,13 @@ function overview() {
         row.addEventListener('click', () => { bridge.focus(s.id); closeBalloon(); });
       }
     }
+    for (const o of offloads) {
+      const row = el('div', 'sess', body);
+      el('span', 'st working', row, '⏳');
+      el('b', null, row, `${o.repo} on your ${o.name}`);
+      el('small', null, row, o.line);
+    }
+    for (const o of offloads) option(body, `Stop ${o.repo} on the ${o.name}`, () => { bridge.offloadCmd(o.id, 'stop'); closeBalloon(); });
     if (state.dnd) el('p', 'stats', body, 'Do Not Disturb is on.');
     option(body, 'Mark a zone…', () => { closeBalloon(); bridge.zone(); });
     option(body, 'Animate!', () => { closeBalloon(); animate(); });
@@ -261,6 +287,29 @@ function dismissZone() {
   if (queue.length) advanceQueue();
 }
 
+// ---------------------------------------------------------------- run it here or on your server?
+
+function offloadAsk(q) {
+  view = 'ask';
+  current = null;
+  agent.play('GetAttention');
+  const answer = where => { bridge.offloadAnswer(q.id, where); closeBalloon(); if (where !== 'cancel') agent.play('Writing'); if (queue.length) advanceQueue(); };
+  openBalloon(body => {
+    header(body, { title: `Do you want to launch this on your ${q.name}?` });
+    el('p', null, body, `Claude would run there on its own, in a copy of ${q.repo}. The changes come back here for you to apply, `
+      + `and everything on the ${q.name} is closed when it's done.`);
+    option(body, `Yes, launch it on the ${q.name}`, () => answer('server'));
+    option(body, 'No, run it here on my Mac', () => answer('here'));
+    option(body, 'Cancel', () => answer('cancel'));
+  }, { sticky: true });
+}
+
+function offloadStatus(o) {
+  const i = offloads.findIndex(x => x.id === o.id);
+  if (o.running) { if (i >= 0) offloads[i] = o; else offloads.push(o); }
+  if (liveEl && current && current.offload === o.id) { liveEl.textContent = `⏳ ${o.line}`; requestAnimationFrame(shape); }
+}
+
 // ---------------------------------------------------------------- acting
 
 const RANDOM = ['Congratulate', 'GetArtsy', 'GetTechy', 'GetWizardy', 'GetAttention', 'CheckingSomething', 'Print', 'Save',
@@ -281,7 +330,7 @@ function scheduleIdle() {
   if (hidden) return;
   idleTimer = setTimeout(() => {
     if (agent.anim || hidden) return scheduleIdle();
-    const working = state.sessions.some(s => s.status === 'working');
+    const working = state.sessions.some(s => s.status === 'working') || offloads.length > 0;
     if (working && state.settings.toolAnimations) { agent.playFor(Math.random() < 0.5 ? 'Processing' : 'Thinking', 4000); return; }
     const level = Math.random() < 0.7 ? 'IDLINGLEVEL1' : 'IDLINGLEVEL2';
     const list = window.AGENT.states[level] || window.AGENT.states.IDLINGLEVEL1;
@@ -322,7 +371,7 @@ clippyEl.addEventListener('pointerup', () => {
   const d = drag;
   drag = null;
   if (d.moved) { bridge.dragEnd(); return; }
-  if (view === 'zone') return;                       // keep the half-typed request
+  if (view === 'zone' || view === 'ask') return;     // keep the half-typed request / the open question
   if (!balloon.hidden) { if (view === 'announce' && queue.length) advanceQueue(); else closeBalloon(); }
   else if (queue.length) advanceQueue();
   else overview();
@@ -345,8 +394,14 @@ bridge.on('hide', hide);
 bridge.on('show', show);
 bridge.on('zone-prompt', zonePrompt);
 bridge.on('zone-context', zoneContext);
+bridge.on('offload-ask', offloadAsk);
+bridge.on('offload-status', offloadStatus);
+bridge.on('offloads', list => {
+  offloads = Array.isArray(list) ? list : [];
+  if (view === 'overview' && !balloon.hidden) overview();
+});
 
-window.clippitUI = { enqueue, setState, overview, activity, animate, hide, show, details };
+window.clippitUI = { enqueue, setState, overview, activity, animate, hide, show, details, offloadAsk, offloadStatus };
 
 function start() {
   if (state.settings.hidden) { hidden = true; clippyEl.classList.add('gone'); shape(); return; }
