@@ -6,7 +6,10 @@
 // the extension hangs up and does nothing it asks. "Forget Clippit" in the popup allows a new pairing.
 //
 // What Clippit may ask, and why each is safe to do without a click:
-//   probe   the elements under a zone you just marked on screen (you started it with ⌘⇧K)
+//   probe        the elements under a zone you just marked on screen (you started it with ⌘⇧K)
+//   local-tabs   the addresses of your localhost tabs, and nothing about any other tab
+//   reload       reload one of those localhost tabs (after a Claude session changed that project)
+// and what the extension tells Clippit by itself: errors thrown by localhost pages (sendEvent).
 
 import clippitProbe from './zoneProbe.js';
 
@@ -36,12 +39,13 @@ async function handle(m) {
         if (clippitKey && !clippitRepair) { ws.close(); return; }      // already paired with another Clippit
         await store.set({ clippitKey: m.key, clippitRepair: false });
         trusted = true;
+        flush();
         return;
     }
     if (m.type === "proof") {
         const { clippitKey } = await store.get();
         trusted = !!clippitKey && m.nonce === nonce && m.hmac === await hmac(clippitKey, nonce);
-        if (!trusted) ws.close();
+        if (!trusted) ws.close(); else flush();
         return;
     }
     if (m.type === "request") {
@@ -58,7 +62,22 @@ async function activeTab() {
     return tab;
 }
 
+// localhost, 127.0.0.1, *.localhost and *.test: your own development servers.
+export const isLocal = url => {
+    try { return /^(localhost|127\.0\.0\.1|\[::1\]|[\w-]+\.localhost|[\w.-]+\.test)$/i.test(new URL(url).hostname); } catch (e) { return false; }
+};
+
 async function answer(msg, data) {
+    if (msg === "local-tabs") {
+        const tabs = await chrome.tabs.query({});
+        return tabs.filter(t => isLocal(t.url)).map(t => ({ id: t.id, url: t.url, title: t.title }));
+    }
+    if (msg === "reload") {
+        const tab = await chrome.tabs.get(data.tabId);
+        if (!isLocal(tab.url)) throw new Error("only localhost tabs");
+        await chrome.tabs.reload(tab.id);
+        return { reloaded: tab.url };
+    }
     if (msg === "probe") {
         const tab = await activeTab();
         const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: clippitProbe, args: [data.rect] });
@@ -79,6 +98,18 @@ export async function ensureBridge() {
     ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } handle(m); };
     ws.onclose = () => { ws = null; trusted = false; };
     ws.onerror = () => {};
+}
+
+// Events for Clippit, kept for a minute while the line is down (the background may just have woken).
+const outbox = [];
+export function sendEvent(ev) {
+    outbox.push({ ...ev, at: Date.now() });
+    flush();
+    ensureBridge();
+}
+function flush() {
+    while (outbox.length && outbox[0].at < Date.now() - 60000) outbox.shift();
+    while (ws && ws.readyState === 1 && trusted && outbox.length) ws.send(JSON.stringify({ type: "event", ...outbox.shift() }));
 }
 
 export function bridgeStatus() {

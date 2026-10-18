@@ -164,6 +164,15 @@ if (window === window.top) {
     for (const ev of ["visibilitychange", "focus", "pointermove", "keydown", "scroll"]) window.addEventListener(ev, nudge, { passive: true, capture: true });
 }
 
+// Errors from localhost pages (caught in the page's world by clippitPageErrors.js) go to Clippit.
+if (window === window.top && /^(localhost|127\.0\.0\.1|[\w-]+\.localhost|[\w.-]+\.test)$/i.test(location.hostname)) {
+    window.addEventListener("message", (e) => {
+        if (e.source !== window || !e.data || e.data.__clippit !== "page-error") return;
+        const { kind, message, stack, source } = e.data;
+        try { chrome.runtime.sendMessage("ClippitPageError|" + JSON.stringify({ kind, message, stack, source })); } catch (x) { /* extension reloaded */ }
+    });
+}
+
 contentScriptRunner().catch((e)=>{
     console.error(e);
 });

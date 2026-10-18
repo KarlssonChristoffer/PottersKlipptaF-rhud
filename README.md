@@ -50,7 +50,8 @@ Windows paths are written and tested less, so issues and fixes are welcome.
 `extension/` is **Clippit Says No**, Clippit's browser extension for Safari and Chromium browsers. It turns
 down cookie popups for you (built on Consent-O-Matic), and it is how Mark a zone reads the page under the
 zone, over a paired WebSocket to the app (`lib/bridge.mjs`), so "Allow JavaScript from Apple Events" can
-stay off. Build and install steps are in [extension/README.md](extension/README.md).
+stay off. It also reloads your localhost page when Claude changed its project, and lets Clippy tell you
+when a localhost page throws, with an offer to send the error to Claude. Build and install steps are in [extension/README.md](extension/README.md).
 
 ## How it works
 

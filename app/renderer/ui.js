@@ -3,7 +3,7 @@
 
 const bridge = window.clippit || {          // a stand-in so the page also runs in a plain browser (tests)
   platform: 'web', on() {}, ready() {}, shape() {}, hit() {}, drag() {}, dragEnd() {}, menu() {}, hide() {},
-  zone() {}, zoneSubmit(id, text) { console.log('zone', id, text); }, zoneDismiss() {}, openPrivacy() {},
+  zone() {}, zoneSubmit(id, text) { console.log('zone', id, text); }, zoneDismiss() {}, openPrivacy() {}, action() {},
   focus(id) { console.log('focus', id); },
 };
 
@@ -124,6 +124,7 @@ function renderAnnouncement(a) {
     if (a.body) el('p', null, body, a.body);
     statsLine(body, a.stats);
     if (a.sessionId) option(body, 'Show me', () => { bridge.focus(a.sessionId); advanceQueue(); });
+    for (const act of a.actions || []) option(body, act.label, () => { bridge.action(a.id, act.id); advanceQueue(); });
     if (a.kind === 'done' && (a.reply || a.prompt || (a.stats && a.stats.files) || (a.commandList && a.commandList.length))) {
       option(body, 'What did it do?', () => details(a));
     }

@@ -1,5 +1,5 @@
 import GDPRConfig from './GDPRConfig.js';
-import { bridgeStatus, ensureBridge, forgetClippit } from './clippitBridge.js';
+import { bridgeStatus, ensureBridge, forgetClippit, isLocal, sendEvent } from './clippitBridge.js';
 
 ensureBridge();
 
@@ -17,6 +17,16 @@ chrome.runtime.onMessage.addListener(function (message, sender, reply) {
     switch (message.split("|")[0]) {
         case "ClippitNudge": {          // a page woke us up: make sure Clippit can reach us
             ensureBridge();
+            reply();
+            return false;
+        }
+
+        case "ClippitPageError": {      // a localhost page threw; Clippit decides whether to mention it
+            if (sender.tab && isLocal(sender.tab.url)) {
+                let e = {};
+                try { e = JSON.parse(message.substring(message.indexOf("|") + 1)); } catch (x) { /* ignore */ }
+                sendEvent({ kind: "page-error", url: sender.tab.url, title: sender.tab.title, error: e });
+            }
             reply();
             return false;
         }

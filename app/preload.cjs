@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld('clippit', {
   zoneSubmit: (id, text) => ipcRenderer.send('zone-submit', { id: String(id), text: String(text) }),
   zoneDismiss: () => ipcRenderer.send('zone-dismiss'),
   openPrivacy: which => ipcRenderer.send('open-privacy', String(which)),
+  action: (id, action) => ipcRenderer.send('balloon-action', { id: String(id), action: String(action) }),
 });

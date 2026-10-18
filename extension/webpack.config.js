@@ -51,6 +51,7 @@ module.exports = env => ({
   mode: 'production',
   entry: {
     service: ['./src/background.js'],
+    pageErrors: ['./src/clippitPageErrors.js'],
     content: [
       './src/contentScript.js',
       "./src/content.scss",

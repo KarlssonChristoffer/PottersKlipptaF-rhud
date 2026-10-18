@@ -1,6 +1,6 @@
 # Clippit Says No
 
-Clippit's browser extension. It does two things:
+Clippit's browser extension. It does three things:
 
 - **Says no to cookie popups.** Consent-O-Matic's engine and rules turn down consent popups on known
   consent managers, and Clippit's own pass (`src/clippitFallback.js`) handles the rest: the reject or
@@ -13,10 +13,15 @@ Clippit's browser extension. It does two things:
   "Allow JavaScript from Apple Events". Turn that Safari/Chrome setting **off**: it let any app with
   Automation rights run JavaScript in your logged-in tabs.
 
+- **Watches your localhost pages** (localhost, 127.0.0.1, *.localhost, *.test, nothing else). When a
+  Claude session changed files in the project a localhost tab is served from, Clippit reloads that tab;
+  when such a page throws (uncaught errors, unhandled rejections, console.error), Clippy says so and
+  offers to send the error to Claude in that project. Both are switches under Browser in Clippit's menu.
+
 The first Clippit that answers pairs with the extension (trust on first use); after that Clippit has to
 prove it holds the key on every connection, or the extension does nothing it asks. "Pair with Clippit
 again" in the popup starts over. On its own the extension only acts on cookie popups; everything else it
-does for Clippit starts with something you did (marking a zone).
+does for Clippit is either on your localhost pages or starts with something you did (marking a zone).
 
 ## Build
 
