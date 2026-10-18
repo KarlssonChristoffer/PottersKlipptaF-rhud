@@ -154,3 +154,67 @@ test('zone: local URLs, what to grep for, and the bundle Claude reads', () => {
   const p = composePrompt({ request: 'Gör knapparna likadana', bundleDir: '/z', ctx, extra: 'Use REA.' });
   assert.ok(p.startsWith('Gör knapparna likadana\n') && p.includes('/z/context.md') && p.includes('/z/zone.png') && p.trim().endsWith('Use REA.'));
 });
+
+test('browser bridge: only extensions get in, pairing hands out a key once, then Clippit proves itself', async () => {
+  const { startBridge, readFrames } = await import('../lib/bridge.mjs');
+  const { createHmac } = await import('node:crypto');
+  const net = await import('node:net');
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'clippit-bridge-'));
+  const port = 41300 + Math.floor(Math.random() * 500);
+  const bridge = startBridge({ dir, port });
+  await new Promise(r => setTimeout(r, 100));
+
+  const masked = text => {
+    const body = Buffer.from(text), mask = Buffer.from([1, 2, 3, 4]);
+    return Buffer.concat([Buffer.from([0x81, 0x80 | body.length]), mask, Buffer.from(body.map((b, i) => b ^ mask[i & 3]))]);
+  };
+  function open(origin) {
+    return new Promise(resolve => {
+      const s = net.connect(port, '127.0.0.1', () => s.write(`GET /ext HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nOrigin: ${origin}\r\n\r\n`));
+      let buf = Buffer.alloc(0), upgraded = false;
+      const got = [];
+      s.on('data', d => {
+        buf = Buffer.concat([buf, d]);
+        if (!upgraded) {
+          const end = buf.indexOf('\r\n\r\n');
+          if (end < 0) return;
+          const head = buf.subarray(0, end).toString();
+          buf = buf.subarray(end + 4);
+          upgraded = true;
+          resolve({ status: Number(head.split(' ')[1]), accept: (head.match(/Sec-WebSocket-Accept: (.+)/) || [])[1], s, got,
+            send: m => s.write(masked(JSON.stringify(m))), next: () => new Promise(r => { const t = setInterval(() => { if (got.length) { clearInterval(t); r(got.shift()); } }, 10); }) });
+        }
+        // server frames are unmasked; readFrames handles both
+        const r = readFrames(buf);
+        buf = r.rest;
+        got.push(...r.messages.map(t => JSON.parse(t)));
+      });
+    });
+  }
+
+  const evil = await open('https://evil.example');
+  assert.equal(evil.status, 403);
+  evil.s.destroy();
+
+  const ext = await open('chrome-extension://abcdefgh');
+  assert.equal(ext.status, 101);
+  assert.equal(ext.accept, 's3pPLMBiTxaQ9kYGzzhZRbK+xOo=');        // RFC 6455's example
+  ext.send({ type: 'hello', browser: 'chromium', nonce: 'n1', paired: false });
+  const paired = await ext.next();
+  assert.equal(paired.type, 'paired');
+  assert.match(paired.key, /^[0-9a-f]{64}$/);
+  ext.s.destroy();
+
+  const again = await open('chrome-extension://abcdefgh');
+  again.send({ type: 'hello', browser: 'chromium', nonce: 'n2', paired: true });
+  const proof = await again.next();
+  assert.deepEqual(proof, { type: 'proof', nonce: 'n2', hmac: createHmac('sha256', paired.key).update('n2').digest('hex') });
+  const answer = bridge.request('chromium', 'probe', { rect: { x: 1 } });
+  const req = await again.next();
+  assert.equal(req.msg, 'probe');
+  again.send({ type: 'reply', id: req.id, data: { url: 'http://localhost:3000/' } });
+  assert.deepEqual(await answer, { url: 'http://localhost:3000/' });
+  assert.ok(bridge.connected('chromium') && !bridge.connected('safari'));
+  again.s.destroy();
+  bridge.close();
+});

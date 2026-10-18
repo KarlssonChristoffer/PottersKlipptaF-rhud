@@ -151,6 +151,19 @@ window.addEventListener("message", (event)=>{
     }
 });
 
+// Keep the background (and with it the line to the Clippit app) awake while you use the browser: a nudge
+// when a page shows or gets focus, and at most every 20 seconds while you move, type or scroll.
+if (window === window.top) {
+    let last = 0;
+    const nudge = () => {
+        if (document.visibilityState !== "visible" || Date.now() - last < 20000) return;
+        last = Date.now();
+        try { chrome.runtime.sendMessage("ClippitNudge"); } catch (e) { /* extension reloaded */ }
+    };
+    nudge();
+    for (const ev of ["visibilitychange", "focus", "pointermove", "keydown", "scroll"]) window.addEventListener(ev, nudge, { passive: true, capture: true });
+}
+
 contentScriptRunner().catch((e)=>{
     console.error(e);
 });

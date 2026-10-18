@@ -1,8 +1,9 @@
-// Runs inside the browser tab (sent over AppleScript by lib/zone.mjs). Given the marked zone in screen
+// Mark a zone, inside the browser tab: the extension runs this in the active tab when Clippit asks over
+// the bridge (lib/bridge.mjs), after you marked a zone on screen. Given the marked zone in screen
 // points, it finds the page elements inside it and returns them as a JSON string: what they are, how to
 // select them, how they look (computed styles), their HTML, and, in development builds, which component
 // and source file rendered them. Read only: it changes nothing on the page.
-function clippitProbe(R) {
+export default function clippitProbe(R) {
   var sideChrome = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
   var topChrome = Math.max(0, window.outerHeight - window.innerHeight - sideChrome);
   var zoom = window.visualViewport ? window.visualViewport.scale : 1;

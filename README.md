@@ -45,6 +45,13 @@ animation. Don't use `nofocus`: Hyprland then drops clicks, and you couldn't ans
 and iTerm2); on Windows it brings the terminal's window forward. Clippit is used daily on Linux; the macOS and
 Windows paths are written and tested less, so issues and fixes are welcome.
 
+## The browser extension
+
+`extension/` is **Clippit Says No**, Clippit's browser extension for Safari and Chromium browsers. It turns
+down cookie popups for you (built on Consent-O-Matic), and it is how Mark a zone reads the page under the
+zone, over a paired WebSocket to the app (`lib/bridge.mjs`), so "Allow JavaScript from Apple Events" can
+stay off. Build and install steps are in [extension/README.md](extension/README.md).
+
 ## How it works
 
 `hook/clippit-hook.mjs` runs for each Claude Code event as an **async** hook: it can't block or change Claude, and

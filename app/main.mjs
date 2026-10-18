@@ -13,6 +13,7 @@ import { startServer } from '../lib/server.mjs';
 import { Sessions } from '../lib/sessions.mjs';
 import { composePrompt, launchClaude, writePrompt } from '../lib/handoff.mjs';
 import { addRepo, frontApp, gatherZone, summarize, writeBundle } from '../lib/zone.mjs';
+import { startBridge } from '../lib/bridge.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const asset = name => path.join(here, 'assets', 'clippy', name);
@@ -33,7 +34,7 @@ const dir = configDir();
 let settings = loadSettings(dir);
 const sessions = new Sessions();
 const history = [];                 // recent announcements, newest first
-let win = null, tray = null, token = '', server = null, dragStart = null, quitting = false;
+let win = null, tray = null, token = '', server = null, bridge = null, dragStart = null, quitting = false;
 
 const save = () => saveSettings(settings, dir);
 const send = (channel, data) => { if (win && !win.isDestroyed()) win.webContents.send(channel, data); };
@@ -195,7 +196,7 @@ function beginZone(rect, p) {
   zone.ctxPromise = (async () => {
     await sleep(250);                                    // let the overlay leave the screen before the screenshot
     const front = await p.frontPromise;
-    return gatherZone(rect, { display: p.display, front, sessions: sessions.list(), dir: zdir, configDir: dir });
+    return gatherZone(rect, { display: p.display, front, sessions: sessions.list(), dir: zdir, configDir: dir, bridge });
   })().then(ctx => {
     if (zone && zone.id === id) send('zone-context', { id, summary: summarize(ctx), notes: ctx.notes, images: !!ctx.images.zone });
     return ctx;
@@ -366,7 +367,7 @@ ipcMain.on('hide', () => setHidden(true));
 
 app.on('second-instance', () => setHidden(false));
 app.on('window-all-closed', () => { /* keep running in the tray */ });
-app.on('before-quit', () => { quitting = true; if (server) server.close(); });
+app.on('before-quit', () => { quitting = true; if (server) server.close(); if (bridge) bridge.close(); });
 app.on('will-quit', () => globalShortcut.unregisterAll());
 
 app.whenReady().then(async () => {
@@ -381,6 +382,7 @@ app.whenReady().then(async () => {
   }
   server = await startServer({ onEvent, token: () => token });
   token = writeConnection(server.port, dir);
+  bridge = startBridge({ dir });
   createWindow();
   createTray();
   registerShortcut();

@@ -24,6 +24,14 @@ if (frontTab){
             GDPRConfig.setPageActive(url, activeInput.checked);
         });
 
+        // Whether the Clippit app can reach us (Mark a zone needs it).
+        const status = document.querySelector("#clippit-status"), forget = document.querySelector("#clippit-forget");
+        chrome.runtime.sendMessage("ClippitStatus", (s) => {
+            status.textContent = s && s.connected ? "connected" : "not connected (is Clippit running?)";
+            forget.style.display = s && s.connected ? "none" : "";
+        });
+        forget.addEventListener("click", () => chrome.runtime.sendMessage("ClippitForget", () => window.close()));
+
         // The master switch: off means no rules and no Clippit pass on any page.
         let enabledInput = document.querySelector("#enabled");
         GDPRConfig.getGeneralSettings().then((general) => {

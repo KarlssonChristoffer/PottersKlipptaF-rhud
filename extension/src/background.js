@@ -1,4 +1,7 @@
 import GDPRConfig from './GDPRConfig.js';
+import { bridgeStatus, ensureBridge, forgetClippit } from './clippitBridge.js';
+
+ensureBridge();
 
 const STATUS = {
     "INIT": 0,
@@ -12,6 +15,22 @@ chrome.runtime.onMessage.addListener(function (message, sender, reply) {
     console.log("Got msg", message);
     try {
     switch (message.split("|")[0]) {
+        case "ClippitNudge": {          // a page woke us up: make sure Clippit can reach us
+            ensureBridge();
+            reply();
+            return false;
+        }
+
+        case "ClippitStatus": {
+            ensureBridge().then(() => setTimeout(() => reply(bridgeStatus()), 400));
+            return true;
+        }
+
+        case "ClippitForget": {
+            forgetClippit().then(() => { ensureBridge(); reply(); });
+            return true;
+        }
+
         case "GetTabUrl": {
             reply(sender.tab.url);
             return false;
