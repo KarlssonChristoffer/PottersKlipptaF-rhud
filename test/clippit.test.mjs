@@ -13,6 +13,8 @@ import { Sessions, describeTool } from '../lib/sessions.mjs';
 import { gist, readTranscript } from '../lib/transcript.mjs';
 import { addHooks, removeHooks, EVENTS } from '../install/install.mjs';
 import { decompress } from '../install/acs.mjs';
+import { composePrompt } from '../lib/handoff.mjs';
+import { summarize, _test as zone } from '../lib/zone.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'clippit-test-'));
@@ -129,4 +131,26 @@ test('decompress: Agent literals, an overlapping match and the end marker', () =
   assert.equal(decompress(block, 5).toString('latin1'), 'ABABA');
   assert.throws(() => decompress(block, 4), /past the end|out of range/);
   assert.throws(() => decompress(Buffer.from('not compressed!'), 10), /not an Agent-compressed block/);
+});
+
+test('zone: local URLs, what to grep for, and the bundle Claude reads', () => {
+  for (const h of ['localhost', '127.0.0.1', 'app.localhost', 'shop.test']) assert.ok(zone.LOCAL.test(h), h);
+  assert.ok(!zone.LOCAL.test('example.com'));
+  assert.deepEqual(zone.grow({ x: 50, y: 50, width: 10, height: 10 }, 100, { x: 0, y: 0, width: 120, height: 1000 }),
+    { x: 0, y: 0, width: 120, height: 160 });
+  const ctx = { zone: { x: 1, y: 2, width: 300, height: 80 }, images: { zone: 'zone.png', around: null }, notes: ['no URL'],
+    front: { appName: 'Google Chrome', windowTitle: 'Shop' }, ocr: { lines: [{ text: 'Spara' }] },
+    browser: { url: 'http://localhost:3000/settings', title: 'Settings', dom: { page: { viewport: '1200x800', frameworks: ['React'] },
+      elements: [{ kind: 'button', tag: 'button', selector: '[data-testid="save"]', text: 'Spara', testId: 'save',
+        component: 'React SaveButton', styles: { color: 'rgb(255, 255, 255)' }, html: '<button>Spara</button>' }] } },
+    repo: { path: '/code/shop', how: 'port 3000', branch: 'main', remote: '', stack: ['react@18'], changedFiles: [], recentCommits: [],
+      likelySource: [{ needle: 'Spara', matches: ['src/SaveButton.tsx:12:  Spara'] }], sessions: [] } };
+  assert.deepEqual(zone.needlesFrom(ctx), ['save', 'Spara']);
+  const md = zone.md(ctx, 'Gör knapparna likadana');
+  for (const s of ['Gör knapparna likadana', 'localhost:3000/settings', '[data-testid="save"]', 'React SaveButton', 'src/SaveButton.tsx:12', 'no URL']) {
+    assert.ok(md.includes(s), s);
+  }
+  assert.deepEqual(summarize(ctx), ['localhost:3000/settings', '1 button', 'repo: shop (main)', '1 likely source file']);
+  const p = composePrompt({ request: 'Gör knapparna likadana', bundleDir: '/z', ctx, extra: 'Use REA.' });
+  assert.ok(p.startsWith('Gör knapparna likadana\n') && p.includes('/z/context.md') && p.includes('/z/zone.png') && p.trim().endsWith('Use REA.'));
 });

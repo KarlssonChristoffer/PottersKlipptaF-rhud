@@ -76,3 +76,11 @@ html, body {
 .st.waiting { color: #c22; }
 .st.idle { color: #2a8a2a; }
 .st.error { color: #c60; }
+
+.balloon textarea.ask {
+  display: block; width: 100%; box-sizing: border-box; margin: 2px 0 6px; padding: 3px 4px; resize: vertical;
+  font: 11px "XP Tahoma", Tahoma, "Segoe UI", sans-serif; color: #000; background: #fff; border: 1px solid #7f9db9;
+  -webkit-user-select: text; user-select: text; cursor: text; outline: none;
+}
+.balloon textarea.ask:focus { border-color: #1f5ee0; }
+.balloon .notes li { color: #8a5a00; }

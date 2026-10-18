@@ -1,7 +1,7 @@
 // Clippit's Electron main process: the always-on-top Clippit window, the tray, and the bridge from
 // Claude Code hook events (lib/server.mjs) to what Clippit says and does.
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, nativeImage, screen, Tray } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, Notification, nativeImage, screen, shell, Tray } from 'electron';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +11,8 @@ import { configDir, loadSettings, saveSettings, writeConnection } from '../lib/c
 import { focusSession, isFocused } from '../lib/platform.mjs';
 import { startServer } from '../lib/server.mjs';
 import { Sessions } from '../lib/sessions.mjs';
+import { composePrompt, launchClaude, writePrompt } from '../lib/handoff.mjs';
+import { addRepo, frontApp, gatherZone, summarize, writeBundle } from '../lib/zone.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const asset = name => path.join(here, 'assets', 'clippy', name);
@@ -136,6 +138,117 @@ async function focus(id) {
     where: sessions.where(s), headline: '', body: `I couldn't bring that terminal forward (${r.how}).`, sticky: false });
 }
 
+// ---------------------------------------------------------------- mark a zone
+//
+// ⌘⇧K (or his menu): a dimmed layer over the screen you drag a zone on. While you tell Clippit what you
+// want with it, lib/zone.mjs collects everything it can about the zone; then a new claude starts in the
+// repo behind it with your words and that context.
+
+let zoneWin = null, pendingZone = null, zone = null;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function closeZoneWin() {
+  if (zoneWin && !zoneWin.isDestroyed()) zoneWin.close();
+  zoneWin = null;
+}
+
+function startZone() {
+  if (zoneWin) return;
+  const frontPromise = frontApp().catch(() => null);     // read before the overlay takes the focus
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const b = display.bounds;
+  zoneWin = new BrowserWindow({
+    x: b.x, y: b.y, width: b.width, height: b.height, show: false, frame: false, transparent: true,
+    backgroundColor: '#00000000', hasShadow: false, resizable: false, movable: false, minimizable: false,
+    maximizable: false, fullscreenable: false, skipTaskbar: true, alwaysOnTop: true, enableLargerThanScreen: true,
+    title: 'Clippit — mark a zone',
+    webPreferences: { preload: path.join(here, 'preload-zone.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
+  });
+  zoneWin.setAlwaysOnTop(true, 'screen-saver');
+  zoneWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  zoneWin.loadFile(path.join(here, 'zone', 'overlay.html'));
+  zoneWin.once('ready-to-show', () => {
+    if (!zoneWin) return;
+    zoneWin.setBounds(b);
+    zoneWin.show();
+    zoneWin.focus();
+    if (IS_MAC) app.focus({ steal: true });
+  });
+  zoneWin.on('closed', () => { zoneWin = null; });
+  pendingZone = { frontPromise, display };
+}
+
+function focusClippit() {
+  if (!win) return;
+  win.showInactive();
+  if (IS_MAC) { win.setIgnoreMouseEvents(false); app.focus({ steal: true }); }
+  win.focus();
+}
+
+function beginZone(rect, p) {
+  const id = `z${Date.now()}`;
+  const zdir = path.join(dir, 'zones', new Date().toISOString().replace(/[:.]/g, '-'));
+  zone = { id, rect, dir: zdir };
+  if (settings.hidden) setHidden(false);
+  send('zone-prompt', { id, summary: ['looking at what you marked…'] });
+  focusClippit();
+  zone.ctxPromise = (async () => {
+    await sleep(250);                                    // let the overlay leave the screen before the screenshot
+    const front = await p.frontPromise;
+    return gatherZone(rect, { display: p.display, front, sessions: sessions.list(), dir: zdir, configDir: dir });
+  })().then(ctx => {
+    if (zone && zone.id === id) send('zone-context', { id, summary: summarize(ctx), notes: ctx.notes, images: !!ctx.images.zone });
+    return ctx;
+  }).catch(e => { console.error('clippit: zone', e); return null; });
+}
+
+function say(body, title = 'Mark a zone', extra = {}) {
+  send('announce', { id: `z${Date.now()}`, kind: 'info', title, where: '', headline: '', body, sticky: false, ...extra });
+}
+
+async function submitZone(id, text) {
+  if (!zone || zone.id !== id || !String(text || '').trim()) return;
+  const z = zone;
+  zone = null;
+  const ctx = await z.ctxPromise;
+  if (!ctx) { say('Something went wrong while I looked at that zone. Try again?'); return; }
+  if (!ctx.repo) {
+    const r = await dialog.showOpenDialog({ title: 'Which project is this in?', buttonLabel: 'Use this project',
+      properties: ['openDirectory'], defaultPath: os.homedir() });
+    if (r.canceled || !r.filePaths[0]) { say('OK, I put it away. Your zone is saved in ' + z.dir); return; }
+    await addRepo(ctx, r.filePaths[0], 'you picked it', sessions.list());
+  }
+  writeBundle(z.dir, ctx, text);
+  const promptFile = writePrompt(z.dir, composePrompt({ request: text, bundleDir: z.dir, ctx, extra: settings.zoneInstructions }));
+  const res = await launchClaude({ repo: ctx.repo.path, promptFile });
+  if (res.ok) say(`I started Claude in ${path.basename(ctx.repo.path)} with your request and everything I found. I'll tell you when it's done.`, 'Sent to Claude', { animation: 'SendMail' });
+  else say(`I couldn't open a terminal (${res.how}). Everything is in ${z.dir}.`, 'Mark a zone');
+}
+
+ipcMain.on('zone-start', () => startZone());
+ipcMain.on('zone-cancel', () => { closeZoneWin(); pendingZone = null; });
+ipcMain.on('zone-done', async (_e, r) => {
+  const p = pendingZone;
+  pendingZone = null;
+  closeZoneWin();
+  if (!p) return;
+  const b = p.display.bounds;
+  beginZone({ x: Math.round(b.x + r.x), y: Math.round(b.y + r.y), width: Math.round(r.width), height: Math.round(r.height) }, p);
+});
+ipcMain.on('zone-submit', (_e, d) => submitZone(d && d.id, d && d.text).catch(e => console.error('clippit: zone submit', e)));
+ipcMain.on('zone-dismiss', () => { zone = null; });
+const PRIVACY = { screen: 'Privacy_ScreenCapture', automation: 'Privacy_Automation', accessibility: 'Privacy_Accessibility' };
+ipcMain.on('open-privacy', (_e, which) => {
+  if (IS_MAC && PRIVACY[which]) shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${PRIVACY[which]}`);
+});
+
+function registerShortcut() {
+  if (!settings.zoneShortcut) return;
+  try {
+    if (!globalShortcut.register(settings.zoneShortcut, () => startZone())) console.warn(`clippit: ${settings.zoneShortcut} is taken by another app`);
+  } catch (e) { console.warn('clippit: shortcut', e.message); }
+}
+
 // ---------------------------------------------------------------- menus
 
 function ago(t) {
@@ -167,6 +280,7 @@ function menuTemplate() {
   const tomorrow = () => { const d = new Date(); d.setHours(24 + 8, 0, 0, 0); return d - Date.now(); };
   return [
     { label: `Clippit — ${summary}`, enabled: false },
+    { label: 'Mark a zone…', accelerator: settings.zoneShortcut || undefined, click: () => startZone() },
     ...list.slice(0, 12).map(s => ({
       label: `${STATUS[s.status] || '·'}  ${sessions.label(s)}${sessions.where(s) ? ` — ${sessions.where(s)}` : ''}`,
       sublabel: s.status === 'waiting' ? `waiting: ${s.waitingFor || 'your reply'}` : s.status === 'working' ? (s.lastToolText || 'working') : ago(s.lastActivity),
@@ -253,6 +367,7 @@ ipcMain.on('hide', () => setHidden(true));
 app.on('second-instance', () => setHidden(false));
 app.on('window-all-closed', () => { /* keep running in the tray */ });
 app.on('before-quit', () => { quitting = true; if (server) server.close(); });
+app.on('will-quit', () => globalShortcut.unregisterAll());
 
 app.whenReady().then(async () => {
   if (!primary) return;
@@ -268,6 +383,7 @@ app.whenReady().then(async () => {
   token = writeConnection(server.port, dir);
   createWindow();
   createTray();
+  registerShortcut();
   screen.on('display-metrics-changed', () => {
     if (win && !settings.position) { const p = homePosition(); win.setPosition(p.x, p.y); }
   });

@@ -3,6 +3,7 @@
 
 const bridge = window.clippit || {          // a stand-in so the page also runs in a plain browser (tests)
   platform: 'web', on() {}, ready() {}, shape() {}, hit() {}, drag() {}, dragEnd() {}, menu() {}, hide() {},
+  zone() {}, zoneSubmit(id, text) { console.log('zone', id, text); }, zoneDismiss() {}, openPrivacy() {},
   focus(id) { console.log('focus', id); },
 };
 
@@ -154,6 +155,7 @@ function details(a) {
 
 function enqueue(a) {
   if (!a) return;
+  if (view === 'zone') { queue.push(a); return; }     // don't interrupt someone typing
   queue = queue.filter(q => !(q.sessionId === a.sessionId && q.kind === a.kind));
   if (current && view === 'announce' && current.sessionId === a.sessionId) current = null;  // replace what's showing
   queue.push(a);
@@ -198,10 +200,65 @@ function overview() {
       }
     }
     if (state.dnd) el('p', 'stats', body, 'Do Not Disturb is on.');
+    option(body, 'Mark a zone…', () => { closeBalloon(); bridge.zone(); });
     option(body, 'Animate!', () => { closeBalloon(); animate(); });
     option(body, 'Options…', () => bridge.menu());
     option(body, 'Hide Clippit', () => bridge.hide());
   }, { seconds: 20 });
+}
+
+// ---------------------------------------------------------------- mark a zone: what should I do with it?
+
+let zoneState = null;
+
+function zonePrompt(z) {
+  zoneState = { id: z.id, summary: z.summary || [], notes: [], images: true, text: '' };
+  view = 'zone';
+  current = null;
+  agent.play('GetAttention');
+  openBalloon(body => {
+    header(body, { title: 'What should I do with this?' });
+    zoneState.whereEl = body.querySelector('.hd small') || el('small', null, body.querySelector('.hd'));
+    zoneState.whereEl.textContent = zoneState.summary.join(' · ');
+    const ta = el('textarea', 'ask', body);
+    ta.placeholder = 'e.g. Make these two buttons look and behave like the ones on the settings page';
+    ta.rows = 4;
+    ta.addEventListener('input', () => { zoneState.text = ta.value; });
+    ta.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitZone(); }
+      if (e.key === 'Escape') { e.preventDefault(); dismissZone(); }
+    });
+    zoneState.notesEl = el('ul', 'list notes', body);
+    option(body, 'Send to Claude  (↩, ⇧↩ for a new line)', submitZone);
+    option(body, 'Never mind', dismissZone);
+    setTimeout(() => ta.focus(), 60);
+  }, { sticky: true });
+}
+
+function zoneContext(c) {
+  if (!zoneState || c.id !== zoneState.id || view !== 'zone') return;
+  zoneState.summary = c.summary || [];
+  zoneState.whereEl.textContent = zoneState.summary.join(' · ') || 'I found nothing beyond the picture';
+  zoneState.notesEl.textContent = '';
+  for (const n of (c.notes || []).slice(0, 3)) el('li', null, zoneState.notesEl, `⚠ ${n}`);
+  if (!c.images) option(zoneState.notesEl, 'Open Screen Recording settings', () => bridge.openPrivacy('screen'));
+  requestAnimationFrame(shape);
+}
+
+function submitZone() {
+  if (!zoneState || !zoneState.text.trim()) return;
+  bridge.zoneSubmit(zoneState.id, zoneState.text);
+  zoneState = null;
+  closeBalloon();
+  agent.play('Writing');
+  if (queue.length) advanceQueue();
+}
+
+function dismissZone() {
+  zoneState = null;
+  bridge.zoneDismiss();
+  closeBalloon();
+  if (queue.length) advanceQueue();
 }
 
 // ---------------------------------------------------------------- acting
@@ -265,6 +322,7 @@ clippyEl.addEventListener('pointerup', () => {
   const d = drag;
   drag = null;
   if (d.moved) { bridge.dragEnd(); return; }
+  if (view === 'zone') return;                       // keep the half-typed request
   if (!balloon.hidden) { if (view === 'announce' && queue.length) advanceQueue(); else closeBalloon(); }
   else if (queue.length) advanceQueue();
   else overview();
@@ -285,6 +343,8 @@ bridge.on('activity', activity);
 bridge.on('animate', () => animate());
 bridge.on('hide', hide);
 bridge.on('show', show);
+bridge.on('zone-prompt', zonePrompt);
+bridge.on('zone-context', zoneContext);
 
 window.clippitUI = { enqueue, setState, overview, activity, animate, hide, show, details };
 
