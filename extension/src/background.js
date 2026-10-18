@@ -215,7 +215,7 @@ function fetchRules(forceUpdate) {
 let tabStatusMap = new Map();
 
 chrome.tabs.onUpdated.addListener((tabId, info, tab)=>{
-    if(info.status != null && info.status === "Loading") {
+    if(info.status != null && info.status === "loading") {
         setBadgeCheckmark("", tabId);
         tabStatusMap.set(tabId, STATUS.INIT);
     }

@@ -205,10 +205,12 @@ export default function clippitConsent({ framed: hideFramed = true } = {}) {
     if (x) { x.click(); unlock(); return finish('closed', `"${label(x) || 'close'}"`); }
   }
   for (const box of list) box.style.setProperty('display', 'none', 'important');
-  // backdrops left behind: full-screen fixed layers with nothing to read
+  // backdrops left behind: full-screen fixed layers with nothing to read or show (not a map, video or
+  // app canvas) that tint the page
   for (const e of D.body.querySelectorAll('*')) {
     const cs = getComputedStyle(e), r = e.getBoundingClientRect();
-    if (cs.position === 'fixed' && r.width >= innerWidth * 0.9 && r.height >= innerHeight * 0.9 && !(e.innerText || '').trim()) e.style.setProperty('display', 'none', 'important');
+    if (cs.position === 'fixed' && r.width >= innerWidth * 0.9 && r.height >= innerHeight * 0.9 && !(e.innerText || '').trim()
+      && !e.querySelector('canvas, video, iframe, img, svg') && (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' || cs.backdropFilter !== 'none')) e.style.setProperty('display', 'none', 'important');
   }
   unlock();
   return finish('hidden', list.map(describe).join(', '));

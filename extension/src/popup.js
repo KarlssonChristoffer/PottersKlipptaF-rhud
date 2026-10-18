@@ -7,8 +7,8 @@ if (frontTab){
         active: true,
         currentWindow: true
     }, (tabs) => {
-        const urlObj = new URL(tabs[0].url);
-        const url = urlObj.host;
+        // No url for pages the extension may not read (the browser's own pages, other extensions)
+        const url = tabs[0] && tabs[0].url ? new URL(tabs[0].url).host : "";
 
         let activeInput = document.querySelector(".sitepart input");
         document.querySelector("#site").textContent = url;

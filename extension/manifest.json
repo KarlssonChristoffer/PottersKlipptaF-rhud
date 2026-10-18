@@ -2,7 +2,7 @@
   "name": "Clippit Says No",
   "description": "Clippit's cookie rejecter: says no to GDPR consent popups for you. Built on Consent-O-Matic.",
   "author": "Christoffer Karlsson",
-  "homepage_url": "https://github.com/KarlssonChristoffer/PottersKlipptaF-rhud",
+  "homepage_url": "https://github.com/LucasStrand/clippit",
   "version": "REPLACED_BY_BUILD_SCRIPT",
   "manifest_version": 3,
   "permissions": [
