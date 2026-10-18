@@ -128,7 +128,7 @@ function renderAnnouncement(a) {
       option(body, 'What did it do?', () => details(a));
     }
     option(body, queue.length ? `Next (${queue.length} more)` : 'OK', () => advanceQueue());
-  }, { sticky: !!a.sticky, seconds: a.kind === 'done' ? state.settings.doneSeconds || 30 : 15 });
+  }, { sticky: !!a.sticky, seconds: a.seconds || (a.kind === 'done' ? state.settings.doneSeconds || 30 : 15) });
 }
 
 function details(a) {

@@ -45,6 +45,20 @@ animation. Don't use `nofocus`: Hyprland then drops clicks, and you couldn't ans
 and iTerm2); on Windows it brings the terminal's window forward. Clippit is used daily on Linux; the macOS and
 Windows paths are written and tested less, so issues and fixes are welcome.
 
+## Cookie popups (macOS)
+
+While Safari or a Chromium browser (Chrome, Brave, Edge, Arc, Vivaldi, Opera) is in front, Clippit looks at the
+active tab every two seconds and turns down cookie and consent popups: the reject or "only necessary" button of
+the big consent managers (OneTrust, Cookiebot, Didomi, Usercentrics and more) or of any popup that has one; the
+settings pane with everything optional switched off when the first screen only offers accept; and when a page
+gives no way to say no, it closes or hides the popup and lets the page scroll again. It never presses accept.
+`lib/consent-probe.js` is the part that runs in the page.
+
+The browser has to allow it: in Safari, Settings → Advanced → "Show features for web developers", then
+Develop → "Allow JavaScript from Apple Events"; in Chrome, View → Developer → "Allow JavaScript from Apple
+Events". Clippit says so once if it can't get in. Turn it off, or just his balloon about it, under **Cookie
+popups** in his menu.
+
 ## How it works
 
 `hook/clippit-hook.mjs` runs for each Claude Code event as an **async** hook: it can't block or change Claude, and

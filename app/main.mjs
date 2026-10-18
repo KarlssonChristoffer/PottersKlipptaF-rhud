@@ -13,6 +13,7 @@ import { startServer } from '../lib/server.mjs';
 import { Sessions } from '../lib/sessions.mjs';
 import { composePrompt, launchClaude, writePrompt } from '../lib/handoff.mjs';
 import { addRepo, frontApp, gatherZone, summarize, writeBundle } from '../lib/zone.mjs';
+import { blockedHint, watchConsent } from '../lib/consent.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const asset = name => path.join(here, 'assets', 'clippy', name);
@@ -249,6 +250,35 @@ function registerShortcut() {
   } catch (e) { console.warn('clippit: shortcut', e.message); }
 }
 
+// ---------------------------------------------------------------- cookie popups
+//
+// lib/consent.mjs watches the browser in front and turns cookie popups down; Clippit only mentions it.
+
+const COOKIE_SAID = {
+  rejected: h => `I said no to the cookies on ${h}.`,
+  closed: h => `${h} had no way to say no, so I closed its cookie popup.`,
+  hidden: h => `${h} had no way to say no, so I hid its cookie popup.`,
+};
+
+function startConsent() {
+  watchConsent({
+    enabled: () => settings.rejectCookies,
+    onHandled: res => {
+      console.log(`clippit: cookies ${res.action} on ${res.host} (${res.how})`);
+      if (!settings.cookieBalloons || settings.hidden || dnd()) return;
+      send('announce', { id: `c${Date.now()}`, kind: 'info', title: 'Cookies', where: '', headline: '',
+        body: COOKIE_SAID[res.action](res.host || 'this page'), sticky: false, seconds: 6 });
+    },
+    onBlocked: (b, err) => {
+      if (settings.hidden || dnd()) return;
+      const how = /-1743|not authori[sz]ed/i.test(err)
+        ? `let me control ${b.app} in System Settings → Privacy & Security → Automation`
+        : `turn on ${blockedHint(b)}`;
+      say(`I can say no to cookie popups for you in ${b.app}, but first ${how}. (Or switch it off under Cookie popups in my menu.)`, 'Cookies');
+    },
+  });
+}
+
 // ---------------------------------------------------------------- menus
 
 function ago(t) {
@@ -301,6 +331,11 @@ function menuTemplate() {
     { label: 'Sounds', type: 'checkbox', checked: settings.sounds, click: i => { settings.sounds = i.checked; save(); pushState(); } },
     { label: 'Tell me about new sessions', type: 'checkbox', checked: settings.announceStarts,
       click: i => { settings.announceStarts = i.checked; save(); } },
+    { label: 'Cookie popups', visible: IS_MAC, submenu: [
+      { label: 'Say no to them for me', type: 'checkbox', checked: settings.rejectCookies,
+        click: i => { settings.rejectCookies = i.checked; save(); } },
+      { label: 'Tell me when I do', type: 'checkbox', checked: settings.cookieBalloons, enabled: settings.rejectCookies,
+        click: i => { settings.cookieBalloons = i.checked; save(); } }] },
     { label: 'Desktop notifications', submenu: [['never', 'Never'], ['hidden', 'When Clippit is hidden or in Do Not Disturb'], ['always', 'Always']]
       .map(([v, label]) => ({ label, type: 'radio', checked: settings.systemNotifications === v,
         click: () => { settings.systemNotifications = v; save(); } })) },
@@ -384,6 +419,7 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
   registerShortcut();
+  startConsent();
   screen.on('display-metrics-changed', () => {
     if (win && !settings.position) { const p = homePosition(); win.setPosition(p.x, p.y); }
   });

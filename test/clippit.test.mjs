@@ -15,6 +15,7 @@ import { addHooks, removeHooks, EVENTS } from '../install/install.mjs';
 import { decompress } from '../install/acs.mjs';
 import { composePrompt } from '../lib/handoff.mjs';
 import { summarize, _test as zone } from '../lib/zone.mjs';
+import { consentScript, _test as consent } from '../lib/consent.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'clippit-test-'));
@@ -153,4 +154,14 @@ test('zone: local URLs, what to grep for, and the bundle Claude reads', () => {
   assert.deepEqual(summarize(ctx), ['localhost:3000/settings', '1 button', 'repo: shop (main)', '1 likely source file']);
   const p = composePrompt({ request: 'Gör knapparna likadana', bundleDir: '/z', ctx, extra: 'Use REA.' });
   assert.ok(p.startsWith('Gör knapparna likadana\n') && p.includes('/z/context.md') && p.includes('/z/zone.png') && p.trim().endsWith('Use REA.'));
+});
+
+test('cookie popups: the AppleScript for each browser, and telling a blocked browser from a busy one', () => {
+  assert.match(consentScript({ app: 'Safari', kind: 'safari' }), /^tell application "Safari" to do JavaScript ".*clippitConsent\(\)" in front document$/s);
+  assert.match(consentScript({ app: 'Google Chrome', kind: 'chromium' }), /^tell application "Google Chrome" to execute active tab of front window javascript "/);
+  assert.ok(consent.isBlocked("Safari got an error: You must enable the 'Allow JavaScript from Apple Events' option in Safari's Develop menu to use 'do JavaScript'."));
+  assert.ok(consent.isBlocked('Google Chrome got an error: Executing JavaScript through AppleScript is turned off. (12)'));
+  assert.ok(consent.isBlocked('execution error: Not authorized to send Apple events to Safari. (-1743)'));
+  assert.ok(!consent.isBlocked("Safari got an error: Can't get document 1. Invalid index. (-1719)"));
+  assert.ok(consent.PROBE.includes('function clippitConsent()'));
 });
