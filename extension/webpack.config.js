@@ -9,6 +9,9 @@ const fs = require('fs');
 const path = require('path');
 const glob = require("glob");
 
+// Forward slashes in, absolute paths out, so the patterns and the entries work on Windows too.
+const find = pattern => glob.sync(pattern.replace(/\\/g, '/'), { absolute: true });
+
 const CLIPPY = path.join(__dirname, '..', 'app', 'assets', 'clippy', 'icon-256.png');
 const icon = size => fs.existsSync(CLIPPY) ? CLIPPY : path.join(__dirname, 'src', `icon_${size}.png`);
 
@@ -23,7 +26,7 @@ function manifest(target) {
 function rules() {
   const merged = {};
   for (const dir of ['rules', 'rules-clippit']) {
-    for (const f of glob.sync(path.join(__dirname, dir, '*.json')).sort()) {
+    for (const f of find(path.join(__dirname, dir, '*.json')).sort()) {
       const r = JSON.parse(fs.readFileSync(f, 'utf8'));
       delete r.$schema;
       Object.assign(merged, r);
@@ -55,18 +58,18 @@ module.exports = env => ({
     content: [
       './src/contentScript.js',
       "./src/content.scss",
-      ...glob.sync(__dirname + "/src/*.svg")
+      ...find(__dirname + "/src/*.svg")
     ],
     ui: [
       './src/options.js',
       './src/popup.js',
       './src/ui.scss',
-      ...glob.sync(__dirname + "/src/*.html")
+      ...find(__dirname + "/src/*.html")
     ],
     editor: [
-      ...glob.sync(__dirname + "/src/editor/js/*.js"),
+      ...find(__dirname + "/src/editor/js/*.js"),
       './src/editor/scss/main.scss',
-      ...glob.sync(__dirname + "/src/editor/*.html")
+      ...find(__dirname + "/src/editor/*.html")
     ]
   },
   output: {

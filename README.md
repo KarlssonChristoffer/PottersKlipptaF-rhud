@@ -42,8 +42,15 @@ animation. Don't use `nofocus`: Hyprland then drops clicks, and you couldn't ans
 ### macOS and Windows
 
 `npm install`, then the steps above. On macOS "Show me" brings the terminal app forward (the right tab in Terminal
-and iTerm2); on Windows it brings the terminal's window forward. Clippit is used daily on Linux; the macOS and
-Windows paths are written and tested less, so issues and fixes are welcome.
+and iTerm2); on Windows it brings the terminal's window forward. For sessions in the Claude desktop app's Code tab,
+on both, it opens that very session in the app. Clippit is used daily on Linux; the macOS and Windows paths are
+written and tested less, so issues and fixes are welcome.
+
+On Windows, `npm run install-hooks` writes a small `clippit.cmd` into `~\.local\bin` (or `%APPDATA%\npm`) when that
+folder is on PATH, and Clippit adds himself to the Start menu on his first start. Mark a zone (Ctrl+Shift+K) takes
+its screenshots and reads the text in them with PowerShell and Windows' own OCR, so there is nothing to install;
+the page's elements come from the extension, and a marked zone starts `claude` in a new console window. If
+`npm install` skipped Electron's download (npm 11 can skip install scripts), `npm run setup` fetches it.
 
 ## The browser extension
 

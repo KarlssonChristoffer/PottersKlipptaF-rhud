@@ -16,6 +16,7 @@ import { decompress } from '../install/acs.mjs';
 import { composePrompt } from '../lib/handoff.mjs';
 import { sandboxFor, summarize, _test as zone } from '../lib/zone.mjs';
 import { isFocused } from '../lib/platform.mjs';
+import * as win from '../lib/win.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'clippit-test-'));
@@ -154,7 +155,7 @@ test('zone: local URLs, what to grep for, and the bundle Claude reads', () => {
   }
   assert.deepEqual(summarize(ctx), ['localhost:3000/settings', '1 button', 'repo: shop (main)', '1 likely source file']);
   const p = composePrompt({ request: 'Gör knapparna likadana', bundleDir: '/z', ctx, extra: 'Use REA.' });
-  assert.ok(p.startsWith('Gör knapparna likadana\n') && p.includes('/z/context.md') && p.includes('/z/zone.png') && p.trim().endsWith('Use REA.'));
+  assert.ok(p.startsWith('Gör knapparna likadana\n') && p.includes(path.join('/z', 'context.md')) && p.includes(path.join('/z', 'zone.png')) && p.trim().endsWith('Use REA.'));
 });
 
 test('browser bridge: only extensions get in, pairing hands out a key once, then Clippit proves itself', async () => {
@@ -222,15 +223,25 @@ test('browser bridge: only extensions get in, pairing hands out a key once, then
 });
 
 test('zone: websites that are not yours get a scratch folder, localhost does not', () => {
-  assert.deepEqual(sandboxFor('https://www.feber.se/nyheter', '/s'), { path: '/s/feber.se', host: 'feber.se', url: 'https://www.feber.se/nyheter' });
+  assert.deepEqual(sandboxFor('https://www.feber.se/nyheter', '/s'), { path: path.join('/s', 'feber.se'), host: 'feber.se', url: 'https://www.feber.se/nyheter' });
   assert.equal(sandboxFor('http://localhost:3000/', '/s'), null);
   assert.equal(sandboxFor('file:///x.html', '/s'), null);
   const ctx = { images: { zone: 'zone.png', around: null }, sandbox: { url: 'https://feber.se/', host: 'feber.se', path: '/s/feber.se' } };
-  const p = composePrompt({ request: 'Bygg en likadan layout', bundleDir: '/z', ctx });
+  const p = composePrompt({ request: 'Bygg en likadan layout', bundleDir: '/z', ctx, platform: 'darwin' });
   assert.ok(p.includes("isn't my code") && p.includes('open index.html'));
 });
 
 test('platform: a Claude desktop session never counts as the one in front', async () => {
   const s = { origin: { env: { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', CLAUDE_CODE_HOST_SESSION_ID: 'local_x' }, pids: [{ pid: 1 }] } };
   assert.equal(await isFocused(s, 'darwin'), false);
+  assert.equal(await isFocused(s, 'win32'), false);
+});
+
+test('windows: folders named on a dev server command line, and the sandbox page opener', () => {
+  assert.deepEqual(win.foldersIn('"C:\\Program Files\\nodejs\\node.exe" D:\\shop\\node_modules\\vite\\bin\\vite.js --port 3000'),
+    ['D:\\shop\\node_modules\\vite\\bin']);
+  assert.deepEqual(win.foldersIn('python manage.py runserver'), []);
+  assert.deepEqual(win.foldersIn('node --config=E:\\app\\vite.config.ts'), ['E:\\app']);
+  const ctx = { images: { zone: null, around: null }, sandbox: { url: 'https://feber.se/', host: 'feber.se', path: '/s' } };
+  assert.ok(composePrompt({ request: 'x', bundleDir: '/z', ctx, platform: 'win32' }).includes('`start index.html`'));
 });

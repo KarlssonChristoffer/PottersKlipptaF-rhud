@@ -41,8 +41,26 @@ export function addHooks(settings, { node = process.execPath, hook = HOOK } = {}
   return settings;
 }
 
+// Windows has no symlinks without admin rights: a one-line clippit.cmd in a folder on PATH calls ours.
+const WIN_MARK = 'rem clippit launcher';
+function windowsLauncher(uninstall) {
+  const onPath = String(process.env.PATH || '').split(';').map(d => path.resolve(d.replace(/"/g, '')).toLowerCase());
+  const dirs = [path.join(os.homedir(), '.local', 'bin'), path.join(process.env.APPDATA || '', 'npm')];
+  for (const d of dirs) {
+    const f = path.join(d, 'clippit.cmd');
+    let current = null;
+    try { current = readFileSync(f, 'utf8'); } catch { /* none yet */ }
+    if (uninstall) { if (current && current.includes(WIN_MARK)) rmSync(f); continue; }
+    if (current && !current.includes(WIN_MARK)) return null;     // never replace a file we didn't make
+    if (!onPath.includes(path.resolve(d).toLowerCase())) continue;
+    writeFileSync(f, `@echo off\r\n${WIN_MARK} (npm run install-hooks wrote this)\r\ncall "${path.join(root, 'bin', 'clippit.cmd')}" %*\r\n`);
+    return f;
+  }
+  return null;
+}
+
 function linkLauncher(uninstall) {
-  if (process.platform === 'win32') return null;
+  if (process.platform === 'win32') return windowsLauncher(uninstall);
   const link = path.join(os.homedir(), '.local', 'bin', 'clippit');
   let current = null;
   try { current = lstatSync(link); } catch { /* none yet */ }
@@ -83,7 +101,9 @@ function main(argv) {
   }
   if (!uninstall) {
     if (!ready()) console.log('\nClippit still needs his frames and sounds: run `npm run setup` once.');
-    console.log('\nStart Clippit with `clippit` (Linux/macOS) or bin\\clippit.cmd (Windows).');
+    console.log(process.platform === 'win32'
+      ? '\nStart Clippit with `clippit` (or bin\\clippit.cmd); after the first start he is also in the Start menu.'
+      : '\nStart Clippit with `clippit` (Linux/macOS) or bin\\clippit.cmd (Windows).');
     console.log('Running Claude Code sessions pick up the hooks after /hooks or a restart.');
   }
 }

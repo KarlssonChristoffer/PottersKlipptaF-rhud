@@ -2,7 +2,7 @@
 // Claude Code hook events (lib/server.mjs) to what Clippit says and does.
 
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, Notification, nativeImage, screen, shell, Tray } from 'electron';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +20,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const asset = name => path.join(here, 'assets', 'clippy', name);
 const WIN_W = 440, WIN_H = 420;
 const IS_MAC = process.platform === 'darwin';
+const IS_WIN = process.platform === 'win32';
 
 app.setName('Clippit');
 // A second `clippit` only wakes the running one (second-instance below) and must not start anything:
@@ -30,6 +31,9 @@ if (!primary) {
   app.quit();
 }
 if (IS_MAC) app.dock?.hide();
+// Windows groups windows and notifications by this id; the Start menu shortcut below carries the same one.
+const APP_ID = 'se.karlsson.clippit';
+if (IS_WIN) app.setAppUserModelId(APP_ID);
 
 const dir = configDir();
 let settings = loadSettings(dir);
@@ -271,7 +275,8 @@ function beginZone(rect, p) {
   zone.ctxPromise = (async () => {
     await sleep(250);                                    // let the overlay leave the screen before the screenshot
     const front = await p.frontPromise;
-    return gatherZone(rect, { display: p.display, front, sessions: sessions.list(), dir: zdir, configDir: dir, bridge, sandbox: settings.zoneSandbox });
+    return gatherZone(rect, { display: p.display, front, sessions: sessions.list(), dir: zdir, configDir: dir, bridge, sandbox: settings.zoneSandbox,
+      toScreen: r => (IS_WIN ? screen.dipToScreenRect(null, r) : r) });
   })().then(ctx => {
     if (zone && zone.id === id) send('zone-context', { id, summary: summarize(ctx), notes: ctx.notes, images: !!ctx.images.zone });
     return ctx;
@@ -341,12 +346,14 @@ function ago(t) {
 const STATUS = { working: '⏳', waiting: '❗', idle: '✓', error: '⚠', ended: '·' };
 const autostartFile = () => path.join(os.homedir(), '.config', 'autostart', 'clippit.desktop');
 
+const loginItem = () => (IS_WIN && !app.isPackaged ? { path: process.execPath, args: [app.getAppPath()] } : {});
+
 function startsAtLogin() {
-  return process.platform === 'linux' ? existsSync(autostartFile()) : app.getLoginItemSettings().openAtLogin;
+  return process.platform === 'linux' ? existsSync(autostartFile()) : app.getLoginItemSettings(loginItem()).openAtLogin;
 }
 
 function setStartAtLogin(on) {
-  if (process.platform !== 'linux') { app.setLoginItemSettings({ openAtLogin: on }); return; }
+  if (process.platform !== 'linux') { app.setLoginItemSettings({ openAtLogin: on, ...loginItem() }); return; }
   const f = autostartFile();
   if (!on) { rmSync(f, { force: true }); return; }
   mkdirSync(path.dirname(f), { recursive: true });
@@ -424,6 +431,24 @@ function createTray() {
   }
 }
 
+// Windows: a Start menu entry (search "Clippit", pin it) that starts this checkout, with Clippy as its
+// icon. Rewritten on each start so it follows the folder if you move it.
+function windowsShortcut() {
+  if (!IS_WIN || app.isPackaged) return;
+  try {
+    const png = readFileSync(asset('icon-256.png'));
+    const ico = Buffer.alloc(22);
+    ico.writeUInt16LE(1, 2); ico.writeUInt16LE(1, 4);                  // an icon file with one image,
+    ico.writeUInt16LE(1, 10); ico.writeUInt16LE(32, 12);              // 256×256 (0 = 256), 32 bits,
+    ico.writeUInt32LE(png.length, 14); ico.writeUInt32LE(22, 18);     // stored as the PNG itself
+    const icon = path.join(dir, 'clippit.ico');
+    writeFileSync(icon, Buffer.concat([ico, png]));
+    const lnk = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Clippit.lnk');
+    shell.writeShortcutLink(lnk, existsSync(lnk) ? 'replace' : 'create', { target: process.execPath, args: `"${app.getAppPath()}"`,
+      cwd: app.getAppPath(), icon, iconIndex: 0, appUserModelId: APP_ID, description: 'Clippit for Claude Code' });
+  } catch (e) { console.warn('clippit: start menu shortcut', e.message); }
+}
+
 // ---------------------------------------------------------------- renderer requests
 
 ipcMain.on('ready', () => pushState());
@@ -473,6 +498,7 @@ app.whenReady().then(async () => {
   bridge = startBridge({ dir, onEvent: onBrowserEvent });
   createWindow();
   createTray();
+  windowsShortcut();
   prepareHelpers(dir).catch(() => {});
   registerShortcut();
   screen.on('display-metrics-changed', () => {

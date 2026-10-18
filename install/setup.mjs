@@ -4,6 +4,7 @@
 //
 //   node install/setup.mjs [path/to/CLIPPIT.ACS] [--force] [--out DIR]
 
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -17,7 +18,16 @@ export const ACS_SHA256 = '0ed1ab3ee8f349d0c2b5446029049be1d64c2294b2b72343ddd5e
 export const ready = (app = path.join(root, 'app')) =>
   existsSync(path.join(app, 'assets', 'clippy', 'atlas.png')) && existsSync(path.join(app, 'renderer', 'agent-data.js'));
 
+// npm 11 can skip install scripts, which leaves the electron package without Electron itself.
+function ensureElectron() {
+  const pkg = path.join(root, 'node_modules', 'electron');
+  if (!existsSync(path.join(pkg, 'install.js')) || existsSync(path.join(pkg, 'path.txt'))) return;
+  console.log('Downloading Electron (npm skipped its install script)');
+  execFileSync(process.execPath, [path.join(pkg, 'install.js')], { cwd: pkg, stdio: 'inherit' });
+}
+
 async function main(argv) {
+  ensureElectron();
   const at = argv.indexOf('--out');
   const app = at >= 0 ? path.resolve(argv[at + 1]) : path.join(root, 'app');
   const file = argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--out');
